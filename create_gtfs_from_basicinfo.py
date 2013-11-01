@@ -37,7 +37,7 @@ settings = {
         'avespeed': 65,
         'headway': 5,
         'firstservice': time(05,00),
-        'lastservice': time(11,59),
+        'lastservice': time(01,00), #1AM
         'id': 30,
         'index': 3000000,
     },
@@ -47,7 +47,7 @@ settings = {
         'avespeed': 35,
         'headway': 5,
         'firstservice': time(05,00),
-        'lastservice': time(11,59),
+        'lastservice': time(01,00), #1AM
         'id': 32,
         'index': 3200000,
     },
@@ -57,7 +57,7 @@ settings = {
         'avespeed': 30,
         'headway': 5,
         'firstservice': time(05,00),
-        'lastservice': time(11,59),
+        'lastservice': time(01,00),
         'id': 34,
         'index': 3400000,
     }
@@ -177,6 +177,9 @@ def create_trips_stoptimes(route_defs, stops, config, schedule):
 
         serv_duration = datetime.combine(date.today(), config['lastservice']) - \
             datetime.combine(date.today(), config['firstservice'])
+        # This logic needed to handle when last service is after midnight
+        if serv_duration < timedelta(0):
+            serv_duration += timedelta(days=1)
 
         trip_start_time = config['firstservice']
         trip_inc = timedelta(0)    
@@ -219,12 +222,15 @@ def create_trip_stoptimes(route_def, trip, trip_start_time, config, schedule):
     except IndexError:
         print "Error: seems like stop with ID %d isn't yet in GTFS stops DB." % stop_id_gtfs
         sys.exit(1)
-    time = trip_start_time
+
+    # We will create the time as a timedelta, as it will handle trips that
+    # cross midnight the way GTFS requires (as a number that increases past
+    # 24:00 hours)
+    time_delta = datetime.combine(date.today(), trip_start_time) - \
+        datetime.combine(date.today(), time(0))
+    time_sec = time_delta.days * 24*60*60 + time_delta.seconds
     #Not sure what we should do about this
     problems = None
-    #import pdb
-    #pdb.set_trace()
-    time_sec = time.hour * 60*60 + time.minute * 60 + time.second
     stop_time = transitfeed.StopTime(
         problems, 
         stop,
@@ -238,7 +244,7 @@ def create_trip_stoptimes(route_def, trip, trip_start_time, config, schedule):
         )
     trip.AddStopTimeObject(stop_time)
     print "Added stop time %d for this route (ID %s) - at t %s" % (stop_id, \
-        stop_id_gtfs, time)
+        stop_id_gtfs, time_delta)
 
     for stop_id in stop_ids[1:]:
         stop_id_gtfs = str(config['index'] + stop_id)
@@ -246,9 +252,10 @@ def create_trip_stoptimes(route_def, trip, trip_start_time, config, schedule):
         # TODO: calculate distance from the last stop (e.g. based on GIS co-ordinates)
         # TODO: calc next time :- distance / speed.
         # HACK for now
-        time_inc_laststop = timedelta(minutes = 3)
+        time_inc_laststop = timedelta(minutes = 8)
 
-        time = (datetime.combine(date.today(), time) + time_inc_laststop).time()
+        time_delta += time_inc_laststop
+        time_sec = time_delta.days * 24*60*60 + time_delta.seconds
 
         # Not sure what we should do about this
         problems = None
@@ -259,7 +266,6 @@ def create_trip_stoptimes(route_def, trip, trip_start_time, config, schedule):
             print "Error: seems like stop with ID %d isn't yet in GTFS stops DB." % stop_id_gtfs
             sys.exit(1)
 
-        time_sec = time.hour * 60*60 + time.minute * 60 + time.second
         stop_time = transitfeed.StopTime(
             problems, 
             stop,
@@ -273,7 +279,7 @@ def create_trip_stoptimes(route_def, trip, trip_start_time, config, schedule):
             )
         trip.AddStopTimeObject(stop_time)
         print "Added stop time %d for this route (ID %s) - at t %s" % (stop_id, \
-            stop_id_gtfs, time)
+            stop_id_gtfs, time_delta)
 
 
 def process_data(inputdb, config, output):
