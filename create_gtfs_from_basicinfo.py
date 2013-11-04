@@ -78,7 +78,9 @@ train_stops = {
 
 train_route_defs = [
     {
-        "name": "craigieburn",
+        "name": "Craigieburn",
+        "headsigns": ["Craigieburn", "City"], #Could potentially do these
+            #based on first and last stops ...
         "stop_ids": [0, 1, 2],
         "service_periods": ["monfri", "sat", "sun"]
     } 
@@ -157,6 +159,12 @@ def add_service_period(days_week_str, schedule):
 
 
 def create_trips_stoptimes(route_defs, stops, config, schedule):
+    """This function creates the GTFS trip and stoptime entries for every
+    trip.
+
+    N.B. currently reads these in from the route_defs and stops data
+    structures. In future may want to read these from the Shapefiles that
+    define these directly.""" 
 
     # Initialise trip_id and counter
     trip_ctr = 0
@@ -213,58 +221,33 @@ def create_trip_stoptimes(route_def, trip, trip_start_time, config, schedule):
 
     stop_ids = route_def["stop_ids"]
 
-    stop_seq = 0
-    # Add the first stop
-    stop_id = stop_ids[0]
-    stop_id_gtfs = str(config['index'] + stop_id)
-    try:
-        stop = [s for s in schedule.GetStopList() if s.stop_id == stop_id_gtfs][0]
-    except IndexError:
-        print "Error: seems like stop with ID %d isn't yet in GTFS stops DB." % stop_id_gtfs
-        sys.exit(1)
-
-    # We will create the time as a timedelta, as it will handle trips that
-    # cross midnight the way GTFS requires (as a number that increases past
-    # 24:00 hours)
+    # We will create the stopping time object as a timedelta, as this way it will handle
+    # trips that cross midnight the way GTFS requires (as a number that can increases past
+    # 24:00 hours, rather than ticking back to 00:00)
     time_delta = datetime.combine(date.today(), trip_start_time) - \
         datetime.combine(date.today(), time(0))
-    time_sec = time_delta.days * 24*60*60 + time_delta.seconds
-    #Not sure what we should do about this
-    problems = None
-    stop_time = transitfeed.StopTime(
-        problems, 
-        stop,
-        pickup_type = 0, # Regularly scheduled pickup 
-        drop_off_type = 0, # Regularly scheduled drop off
-        shape_dist_traveled = None, 
-        arrival_secs = time_sec,
-        departure_secs = time_sec, 
-        stop_time = time_sec, 
-        stop_sequence = stop_seq
-        )
-    trip.AddStopTimeObject(stop_time)
-    print "Added stop time %d for this route (ID %s) - at t %s" % (stop_id, \
-        stop_id_gtfs, time_delta)
 
-    for stop_id in stop_ids[1:]:
+    for stop_seq, stop_id in enumerate(stop_ids):
+
         stop_id_gtfs = str(config['index'] + stop_id)
-        stop_seq += 1
-        # TODO: calculate distance from the last stop (e.g. based on GIS co-ordinates)
-        # TODO: calc next time :- distance / speed.
-        # HACK for now
-        time_inc_laststop = timedelta(minutes = 8)
-
-        time_delta += time_inc_laststop
-        time_sec = time_delta.days * 24*60*60 + time_delta.seconds
-
-        # Not sure what we should do about this
-        problems = None
-
         try:
             stop = [s for s in schedule.GetStopList() if s.stop_id == stop_id_gtfs][0]
         except IndexError:
             print "Error: seems like stop with ID %d isn't yet in GTFS stops DB." % stop_id_gtfs
             sys.exit(1)
+
+        if stop_seq > 0:
+            # TODO: calculate distance from the last stop (e.g. based on GIS co-ordinates)
+            # TODO: calc next time :- distance / speed.
+            # HACK for now
+            time_inc_laststop = timedelta(minutes = 8)
+            time_delta += time_inc_laststop
+
+        time_sec = time_delta.days * 24*60*60 + time_delta.seconds
+
+        # Not currently using this Problems data-reporting capability of GTFS
+        # library
+        problems = None
 
         stop_time = transitfeed.StopTime(
             problems, 
