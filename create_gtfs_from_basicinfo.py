@@ -79,7 +79,7 @@ train_stops = {
 train_route_defs = [
     {
         "name": "Craigieburn",
-        "headsigns": ["Craigieburn", "City"], #Could potentially do these
+        "directions": ["Craigieburn", "City"], #Could potentially do these
             #based on first and last stops ...
         "stop_ids": [0, 1, 2],
         "service_periods": ["monfri", "sat", "sun"]
@@ -173,53 +173,59 @@ def create_trips_stoptimes(route_defs, stops, config, schedule):
         #Re-grab the route entry from our GTFS schedule
         route = [r for r in schedule.GetRouteList() if r.route_id == route_id][0]
 
+        # For our basic scheduler, we're going to just create both trips in
+        # both directions, starting at exactly the same time, at the same
+        # frequencies. In reality this implies at least 2 vehicles per route.
+
         # TODO: something about service schedules - check if this route needs
         # one added?
         service_period = add_service_period("monfri", schedule)
 
-        # TODO: Not really sure about the directions stuff ... we do need to
-        # enter a direction/headsign though on a trip, e.g. "Alamein->City" or
-        # "Alamein"
-        #headsign = directions[int(row["direction"])] 
-        headsign = "CITY"
+        for dir_id, direction in enumerate(route_def["directions"]):
+            headsign = direction
+                
+            serv_duration = datetime.combine(date.today(), config['lastservice']) - \
+                datetime.combine(date.today(), config['firstservice'])
+            # This logic needed to handle when last service is after midnight
+            if serv_duration < timedelta(0):
+                serv_duration += timedelta(days=1)
 
-        serv_duration = datetime.combine(date.today(), config['lastservice']) - \
-            datetime.combine(date.today(), config['firstservice'])
-        # This logic needed to handle when last service is after midnight
-        if serv_duration < timedelta(0):
-            serv_duration += timedelta(days=1)
+            trip_start_time = config['firstservice']
+            trip_inc = timedelta(0)    
 
-        trip_start_time = config['firstservice']
-        trip_inc = timedelta(0)    
+            while trip_inc <= serv_duration:
+                trip_id = config['index'] + trip_ctr
+                trip = route.AddTrip(
+                    schedule, 
+                    headsign = headsign,
+                    trip_id = trip_id,
+                    service_period = service_period )
 
-        while trip_inc <= serv_duration:
-            trip_id = config['index'] + trip_ctr
-            trip = route.AddTrip(
-                schedule, 
-                headsign = headsign,
-                trip_id = trip_id,
-                service_period = service_period )
+                create_trip_stoptimes(route_def, trip, trip_start_time, dir_id, config, schedule)
 
-            create_trip_stoptimes(route_def, trip, trip_start_time, config, schedule)
-
-            # Now update necessary variables ...
-            trip_ctr += 1
-            addtime = timedelta(minutes=config['headway'])
-            trip_inc += addtime
-            # See
-            # http://stackoverflow.com/questions/100210/python-easy-way-to-add-n-seconds-to-a-datetime-time
-            # for why temp conversion to use datetime necessary
-            trip_start_time = (datetime.combine(date.today(), trip_start_time)
-                + addtime).time()
+                # Now update necessary variables ...
+                trip_ctr += 1
+                addtime = timedelta(minutes=config['headway'])
+                trip_inc += addtime
+                # See
+                # http://stackoverflow.com/questions/100210/python-easy-way-to-add-n-seconds-to-a-datetime-time
+                # for why temp conversion to use datetime necessary
+                trip_start_time = (datetime.combine(date.today(), trip_start_time)
+                    + addtime).time()
 
 
 
-def create_trip_stoptimes(route_def, trip, trip_start_time, config, schedule):
+def create_trip_stoptimes(route_def, trip, trip_start_time, dir_id, config, schedule):
 
     print "\n%s() called with trip_id = %d, trip start time %s" % (inspect.stack()[0][3], \
          trip.trip_id, str(trip_start_time) )
 
-    stop_ids = route_def["stop_ids"]
+    # If direction ID is 1 - generally "away from city" - create an iterable  in reverse
+    #  stop id order.
+    if dir_id == 0:
+        stop_ids = route_def["stop_ids"]
+    else:
+        stop_ids = reversed(route_def["stop_ids"])
 
     # We will create the stopping time object as a timedelta, as this way it will handle
     # trips that cross midnight the way GTFS requires (as a number that can increases past
