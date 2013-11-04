@@ -1,0 +1,39 @@
+
+GTFS creator work steps:
+
+ 0) create the Agency ID etc (the basics)
+ a) Create the Routes list (Read these in from e.g. a config, or shapefile ...)
+ b) Create the Stops database (basically a name, location, and ID)
+
+ c) Then we need to connect the Routes to Stops :- via both Trips, and Stoptimes 
+    For each route:
+     c1) Calculate starting time
+     c2) Create a new Trip (linking route to a unique trip ID)
+     c3) For each stop (in our original DB) along that route
+         - Calculate time it will get there - prev stop time + distance / ave speed 
+         - Create and enter a new stoptime object with those details. 
+
+TODOs:-
+
+Figure out details of manipulating times in Python properly to do service
+times etc ... http://docs.python.org/2/library/datetime.html#time-objects
+
+Also:- functionalise the Converting to GTFS index, etc ...
+
+2013-11-04
+----------
+
+Work needed:
+ D Ok - current state is that it can read in, and create a one-way schedule.
+  So we need to create a two-way ability next ...
+
+Then start improving the input side:-
+ * Start trying to make the network-spec parts more "GIS-like" and per our
+    definition.
+ * Refactoring the config into a separate file.
+ * Practice with actually reading data from shapefiles 
+   (See that network-reading script, and also the "geoprocessing with 
+    Open Source GIS" online course.)
+ * Think more about defining peak, off-peak frequencies etc (may want
+    to integrate this with weekend service too ... )
+
