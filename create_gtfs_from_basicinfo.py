@@ -186,62 +186,49 @@ def create_trips_stoptimes(route_defs, stops, config, schedule):
 
         # For our basic scheduler, we're going to just create both trips in
         # both directions, starting at exactly the same time, at the same
-        # frequencies. In reality this implies at least 2 vehicles per route.
+        # frequencies. The real-world implication of this is at least
+        # 2 vehicles needed to service each route.
 
         # TODO: currently just doing mon-fri services ...
         service_period = add_service_period("monfri", schedule)
 
         for dir_id, direction in enumerate(route_def["directions"]):
             headsign = direction
-                
-            curr_period = 0
-            first_service = config['headways'][curr_period][0]
-            curr_period_end = config['headways'][curr_period][1]
 
-            period_duration = datetime.combine(date.today(), curr_period_end) - \
-                datetime.combine(date.today(), first_service)
-            # This logic needed to handle periods that cross midnight
-            if period_duration < timedelta(0):
-                period_duration += timedelta(days=1)
-            curr_period_inc = timedelta(0)
-            curr_start_time = first_service
-
+            curr_period = 0    
             while curr_period < len(config['headways']):
-
-                trip_id = config['index'] + trip_ctr
-                trip = route.AddTrip(
-                    schedule, 
-                    headsign = headsign,
-                    trip_id = trip_id,
-                    service_period = service_period )
-
-                create_trip_stoptimes(route_def, trip, curr_start_time, dir_id,
-                    config, schedule)
-
-                # Now update necessary variables ...
-                trip_ctr += 1
+                curr_period_inc = timedelta(0)
+                curr_period_start = config['headways'][curr_period][0]
+                curr_period_end = config['headways'][curr_period][1]
+                period_duration = datetime.combine(date.today(), curr_period_end) - \
+                    datetime.combine(date.today(), curr_period_start)
+                # This logic needed to handle periods that cross midnight
+                if period_duration < timedelta(0):
+                    period_duration += timedelta(days=1)
                 curr_headway = timedelta(minutes=config['headways'][curr_period][2])
-                curr_period_inc += curr_headway
 
-                if curr_period_inc < period_duration:
+                curr_start_time = curr_period_start
+
+                while curr_period_inc < period_duration:
+                    trip_id = config['index'] + trip_ctr
+                    trip = route.AddTrip(
+                        schedule, 
+                        headsign = headsign,
+                        trip_id = trip_id,
+                        service_period = service_period )
+
+                    create_trip_stoptimes(route_def, trip, curr_start_time, dir_id,
+                        config, schedule)
+                    trip_ctr += 1
+
+                    # Now update necessary variables ...
+                    curr_period_inc += curr_headway
                     next_start_time = (datetime.combine(date.today(), curr_start_time) 
                         + curr_headway).time()
                     curr_start_time = next_start_time
-                else:
-                    if curr_period == (len(config['headways'])-1):
-                        # Check we've processed all service periods - if we
-                        # have, then break.
-                        break
-                    else:
-                        next_start_time = config['headways'][curr_period+1][0]
-                        next_end_time = config['headways'][curr_period+1][1]
-                        period_duration = datetime.combine(date.today(), next_end_time) - \
-                            datetime.combine(date.today(), next_start_time)
-                        if period_duration < timedelta(0):
-                            period_duration += timedelta(days=1)
-                        curr_start_time = next_start_time
-                        curr_period_inc = timedelta(0)
-                        curr_period += 1
+
+                curr_period += 1
+
     return                            
 
 
