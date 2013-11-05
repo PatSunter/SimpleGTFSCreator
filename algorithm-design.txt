@@ -18,6 +18,8 @@ TODOs:-
 Figure out details of manipulating times in Python properly to do service
 times etc ... http://docs.python.org/2/library/datetime.html#time-objects
 
+http://stackoverflow.com/questions/100210/python-easy-way-to-add-n-seconds-to-a-datetime-time
+
 Also:- functionalise the Converting to GTFS index, etc ...
 
 2013-11-04
@@ -28,12 +30,21 @@ Work needed:
   So we need to create a two-way ability next ...
 
 Then start improving the input side:-
+ D Added ability to handle a set of different periods during the day
+    with different headways/frequencies in each period.
+    (N.B. haven't bothered to attempt to do this for different days of the
+     week, weekend vs weekday - a level of realism that probably isn't a 
+     high priority yet.)
  * Start trying to make the network-spec parts more "GIS-like" and per our
     definition.
+    Note :- currently, the BZE network file doesn't have attributes for either
+     actual distance of routes - OR average speed along them.
+     So the Nemtools code calculates distance between stops from actual
+     geometry of segments (I think point-point but not sure ...) and then 
+     multiplies by one average speed per mode.
+   
  * Refactoring the config into a separate file.
  * Practice with actually reading data from shapefiles 
    (See that network-reading script, and also the "geoprocessing with 
     Open Source GIS" online course.)
- * Think more about defining peak, off-peak frequencies etc (may want
-    to integrate this with weekend service too ... )
 

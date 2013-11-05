@@ -30,12 +30,23 @@ END_DATE_STR = '20131231'
 
 # For speeds - see HiTrans guide, page 127
 
+#Service periods is a list of tuples:-
+# Where each is a start time, end time, and then a headway during that period.
+default_service_headways = [
+    (time(05,00), time(07,30), 20),
+    (time(07,30), time(10,00), 5),
+    (time(10,00), time(16,00), 10),
+    (time(16,00), time(18,30), 5),
+    (time(18,30), time(23,00), 10),
+    (time(23,00), time(02,00), 20)
+    ]
+
 settings = {
     'train': {
         'name': 'Metro Trains - Upgraded',
         'system': 'Subway',
         'avespeed': 65,
-        'headway': 5,
+        'headways': default_service_headways,
         'firstservice': time(05,00),
         'lastservice': time(01,00), #1AM
         'id': 30,
@@ -45,7 +56,7 @@ settings = {
         'name': 'Yarra Trams - Upgraded',
         'system': 'Tram',
         'avespeed': 35,
-        'headway': 5,
+        'headway': default_service_headways,
         'firstservice': time(05,00),
         'lastservice': time(01,00), #1AM
         'id': 32,
@@ -55,7 +66,7 @@ settings = {
         'name': 'Melbourne Bus - Upgraded',
         'system': 'Bus',
         'avespeed': 30,
-        'headway': 5,
+        'headway': default_service_headways,
         'firstservice': time(05,00),
         'lastservice': time(01,00),
         'id': 34,
@@ -79,9 +90,9 @@ train_stops = {
 train_route_defs = [
     {
         "name": "Craigieburn",
-        "directions": ["Craigieburn", "City"], #Could potentially do these
-            #based on first and last stops ...
-        "stop_ids": [0, 1, 2],
+        "directions": ["City", "Craigieburn"], #Could potentially do these
+            #based on first and last stops ... but define as same for each line ...
+        "stop_ids": [2, 1, 0],
         "service_periods": ["monfri", "sat", "sun"]
     } 
     ]
@@ -177,23 +188,26 @@ def create_trips_stoptimes(route_defs, stops, config, schedule):
         # both directions, starting at exactly the same time, at the same
         # frequencies. In reality this implies at least 2 vehicles per route.
 
-        # TODO: something about service schedules - check if this route needs
-        # one added?
+        # TODO: currently just doing mon-fri services ...
         service_period = add_service_period("monfri", schedule)
 
         for dir_id, direction in enumerate(route_def["directions"]):
             headsign = direction
                 
-            serv_duration = datetime.combine(date.today(), config['lastservice']) - \
-                datetime.combine(date.today(), config['firstservice'])
-            # This logic needed to handle when last service is after midnight
-            if serv_duration < timedelta(0):
-                serv_duration += timedelta(days=1)
+            curr_period = 0
+            first_service = config['headways'][curr_period][0]
+            curr_period_end = config['headways'][curr_period][1]
 
-            trip_start_time = config['firstservice']
-            trip_inc = timedelta(0)    
+            period_duration = datetime.combine(date.today(), curr_period_end) - \
+                datetime.combine(date.today(), first_service)
+            # This logic needed to handle periods that cross midnight
+            if period_duration < timedelta(0):
+                period_duration += timedelta(days=1)
+            curr_period_inc = timedelta(0)
+            curr_start_time = first_service
 
-            while trip_inc <= serv_duration:
+            while curr_period < len(config['headways']):
+
                 trip_id = config['index'] + trip_ctr
                 trip = route.AddTrip(
                     schedule, 
@@ -201,17 +215,34 @@ def create_trips_stoptimes(route_defs, stops, config, schedule):
                     trip_id = trip_id,
                     service_period = service_period )
 
-                create_trip_stoptimes(route_def, trip, trip_start_time, dir_id, config, schedule)
+                create_trip_stoptimes(route_def, trip, curr_start_time, dir_id,
+                    config, schedule)
 
                 # Now update necessary variables ...
                 trip_ctr += 1
-                addtime = timedelta(minutes=config['headway'])
-                trip_inc += addtime
-                # See
-                # http://stackoverflow.com/questions/100210/python-easy-way-to-add-n-seconds-to-a-datetime-time
-                # for why temp conversion to use datetime necessary
-                trip_start_time = (datetime.combine(date.today(), trip_start_time)
-                    + addtime).time()
+                curr_headway = timedelta(minutes=config['headways'][curr_period][2])
+                curr_period_inc += curr_headway
+
+                if curr_period_inc < period_duration:
+                    next_start_time = (datetime.combine(date.today(), curr_start_time) 
+                        + curr_headway).time()
+                    curr_start_time = next_start_time
+                else:
+                    if curr_period == (len(config['headways'])-1):
+                        # Check we've processed all service periods - if we
+                        # have, then break.
+                        break
+                    else:
+                        next_start_time = config['headways'][curr_period+1][0]
+                        next_end_time = config['headways'][curr_period+1][1]
+                        period_duration = datetime.combine(date.today(), next_end_time) - \
+                            datetime.combine(date.today(), next_start_time)
+                        if period_duration < timedelta(0):
+                            period_duration += timedelta(days=1)
+                        curr_start_time = next_start_time
+                        curr_period_inc = timedelta(0)
+                        curr_period += 1
+    return                            
 
 
 
