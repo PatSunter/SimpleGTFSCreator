@@ -82,9 +82,9 @@ settings = {
 ###  reading from shapefiles later anyway
 
 train_stops = {
-    '0': ("North Melbourne", (144.94151,-37.806309)),
-    '1': ("Kensington", (144.930525,-37.793777)),
-    '2': ("Newmarket", (144.928984,-37.787326))
+    0: ("North Melbourne", (144.94151,-37.806309)),
+    1: ("Kensington", (144.930525,-37.793777)),
+    2: ("Newmarket", (144.928984,-37.787326))
     }
 
 train_route_defs = [
@@ -126,20 +126,20 @@ def process_stops(stops_info, config, schedule):
         stop_name = stop_info[0]
         stop_desc = None
         stop_code = None
-        stop_id = str(config['index'] + int(stop_id))
+        stop_id_gtfs = str(config['index'] + stop_id)
         lng = stop_info[1][0]
         lat =  stop_info[1][1]
 
         stop = transitfeed.Stop(
-            stop_id = stop_id,
+            stop_id = stop_id_gtfs,
             name = stop_name,
             stop_code = stop_code,
             lat = lat,
             lng = lng,
         )
 
-        print "Adding stop with ID %d, name '%s', lat,long of (%3f,%3f)" % \
-            (int(stop_id), stop_name, lat, lng)
+        print "Adding stop with ID %s, name '%s', lat,long of (%3f,%3f)" % \
+            (stop_id_gtfs, stop_name, lat, lng)
 
         schedule.AddStopObject(stop)
 
@@ -217,7 +217,7 @@ def create_trips_stoptimes(route_defs, stops, config, schedule):
                         trip_id = trip_id,
                         service_period = service_period )
 
-                    create_trip_stoptimes(route_def, trip, curr_start_time, dir_id,
+                    create_trip_stoptimes(route_def, trip, stops, curr_start_time, dir_id,
                         config, schedule)
                     trip_ctr += 1
 
@@ -231,9 +231,29 @@ def create_trips_stoptimes(route_defs, stops, config, schedule):
 
     return                            
 
+def calc_distance_km(dest_stop, src_stop):
+    # HACK for now - 2km for trains
+    return 2.0
 
 
-def create_trip_stoptimes(route_def, trip, trip_start_time, dir_id, config, schedule):
+def calc_time_on_segment(dest_stop_id, src_stop_id, stops, config):
+    """Calculates travel time between two stops."""
+    # TODO: calculate distance from the last stop (e.g. based on GIS co-ordinates)
+    # TODO: calc next time :- distance / speed.
+    avespeed = config['avespeed']
+    dest_stop = stops[dest_stop_id]
+    src_stop = stops[src_stop_id]
+    # Ensure distance between stops is in same unit (km/h)
+    distance_km = calc_distance_km(dest_stop, src_stop)
+    time_hrs = distance_km / avespeed
+    time_inc = timedelta(hours = time_hrs)
+    # Now round to nearest second
+    time_inc = time_inc - timedelta(microseconds=time_inc.microseconds) + \
+        timedelta(seconds=round(time_inc.microseconds/1e6))
+    return time_inc
+    
+
+def create_trip_stoptimes(route_def, trip, stops, trip_start_time, dir_id, config, schedule):
 
     print "\n%s() called with trip_id = %d, trip start time %s" % (inspect.stack()[0][3], \
          trip.trip_id, str(trip_start_time) )
@@ -251,6 +271,7 @@ def create_trip_stoptimes(route_def, trip, trip_start_time, dir_id, config, sche
     time_delta = datetime.combine(date.today(), trip_start_time) - \
         datetime.combine(date.today(), time(0))
 
+    last_stop_id = -1
     for stop_seq, stop_id in enumerate(stop_ids):
 
         stop_id_gtfs = str(config['index'] + stop_id)
@@ -261,11 +282,8 @@ def create_trip_stoptimes(route_def, trip, trip_start_time, dir_id, config, sche
             sys.exit(1)
 
         if stop_seq > 0:
-            # TODO: calculate distance from the last stop (e.g. based on GIS co-ordinates)
-            # TODO: calc next time :- distance / speed.
-            # HACK for now
-            time_inc_laststop = timedelta(minutes = 8)
-            time_delta += time_inc_laststop
+            time_inc = calc_time_on_segment(stop_id, last_stop_id, stops, config)
+            time_delta += time_inc
 
         time_sec = time_delta.days * 24*60*60 + time_delta.seconds
 
@@ -285,8 +303,9 @@ def create_trip_stoptimes(route_def, trip, trip_start_time, dir_id, config, sche
             stop_sequence = stop_seq
             )
         trip.AddStopTimeObject(stop_time)
-        print "Added stop time %d for this route (ID %s) - at t %s" % (stop_id, \
+        print "Added stop time %d for this route (ID %s) - at t %s" % (stop_seq, \
             stop_id_gtfs, time_delta)
+        last_stop_id = stop_id
 
 
 def process_data(inputdb, config, output):
