@@ -9,6 +9,7 @@ import re
 import inspect
 from datetime import datetime, date, time, timedelta
 from optparse import OptionParser
+import pyproj
 import sys
 
 import transitfeed
@@ -84,7 +85,8 @@ settings = {
 train_stops = {
     0: ("North Melbourne", (144.94151,-37.806309)),
     1: ("Kensington", (144.930525,-37.793777)),
-    2: ("Newmarket", (144.928984,-37.787326))
+    2: ("Newmarket", (144.928984,-37.787326)),
+    3: ("Essendon", (144.916198,-37.756008))
     }
 
 train_route_defs = [
@@ -92,7 +94,7 @@ train_route_defs = [
         "name": "Craigieburn",
         "directions": ["City", "Craigieburn"], #Could potentially do these
             #based on first and last stops ... but define as same for each line ...
-        "stop_ids": [2, 1, 0],
+        "stop_ids": [3, 2, 1, 0],
         "service_periods": ["monfri", "sat", "sun"]
     } 
     ]
@@ -232,8 +234,12 @@ def create_trips_stoptimes(route_defs, stops, config, schedule):
     return                            
 
 def calc_distance_km(dest_stop, src_stop):
-    # HACK for now - 2km for trains
-    return 2.0
+    # TODO :- read datum properly from actual shapefile, don't assume WGS84
+    geod = pyproj.Geod(ellps = "WGS84")
+    angle1, angle2, dist = geod.inv(src_stop[1][0], src_stop[1][1],
+        dest_stop[1][0], dest_stop[1][1])
+    dist_km = dist/1000.0
+    return dist_km
 
 
 def calc_time_on_segment(dest_stop_id, src_stop_id, stops, config):
