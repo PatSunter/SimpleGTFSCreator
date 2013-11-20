@@ -416,13 +416,21 @@ if __name__ == "__main__":
     parser = OptionParser()
     parser.add_option('--segments', dest='inputsegments', help='Shapefile of line segments.')
     parser.add_option('--stops', dest='inputstops', help='Shapefile of stops.')
-    parser.add_option('--service', dest='service', help='Should be train, tram or bus.')
+    parser.add_option('--service', dest='service', help="Should be 'train', 'tram' or 'bus'.")
     parser.add_option('--output', dest='output', help='Path of output file. Should end in .zip')
     parser.set_defaults(output='google_transit.zip')
     (options, args) = parser.parse_args()
 
-    # Hack override ...
-    options.service = "train"
+    if options.inputsegments is None:
+        parser.print_help()
+        parser.error("No segments shapefile path given.") 
+    if options.inputstops is None:
+        parser.print_help()
+        parser.error("No stops shapefile path given.")
+    if options.service is None:
+        parser.print_help()
+        parser.error("Need to specify a service.")
+
     config = settings[options.service]
 
     process_data(options.inputsegments, options.inputstops, config, options.output)
