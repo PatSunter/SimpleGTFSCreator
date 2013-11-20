@@ -4,8 +4,8 @@
 # template for creating this one.
 
 import os
-import sqlite3
 import re
+import csv
 import inspect
 from datetime import datetime, date, time, timedelta
 from optparse import OptionParser
@@ -44,13 +44,17 @@ default_service_headways = [
     (time(23,00), time(02,00), 20)
     ]
 
+DEFAULT_SERVICE_INFO = [
+    ("monfri", default_service_headways),
+    ("sat", default_service_headways),
+    ("sun", default_service_headways) ]
+
 settings = {
     'train': {
         'name': 'Metro Trains - Upgraded',
         'url': 'http://www.bze.org.au',
         'system': 'Subway',
         'avespeed': 65,
-        'headways': default_service_headways,
         'id': 30,
         'index': 3000000,
     },
@@ -59,7 +63,6 @@ settings = {
         'url': 'http://www.bze.org.au',
         'system': 'Tram',
         'avespeed': 35,
-        'headway': default_service_headways,
         'id': 32,
         'index': 3200000,
     },
@@ -68,7 +71,6 @@ settings = {
         'url': 'http://www.bze.org.au',
         'system': 'Bus',
         'avespeed': 30,
-        'headway': default_service_headways,
         'id': 34,
         'index': 3400000,
     }
@@ -87,7 +89,6 @@ train_route_defs = [
         "directions": ["City", "Craigieburn"], #Could potentially do these
             #based on first and last stops ... but define as same for each line ...
         "segments": [0, 1, 2],
-        "service_periods": ["monfri", "sat", "sun"]
     } 
     ]
 #"Ascot Vale Station",
@@ -185,57 +186,59 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp, confi
 
     # Initialise trip_id and counter
     trip_ctr = 0
-    for ii, route_def in enumerate(route_defs):
-        gtfs_route_id = str(config['index'] + ii)
-        #Re-grab the route entry from our GTFS schedule
-        route = [r for r in schedule.GetRouteList() if r.route_id == gtfs_route_id][0]
+    # TODO: force this as a default for now. Possible we might want to convert
+    # this to a database or configurable per-route for now ...
+    services_info = DEFAULT_SERVICE_INFO
+    for serv_period, serv_headways in services_info:
+        service_period = add_service_period(serv_period, schedule)
+        for ii, route_def in enumerate(route_defs):
+            gtfs_route_id = str(config['index'] + ii)
+            #Re-grab the route entry from our GTFS schedule
+            route = [r for r in schedule.GetRouteList() if r.route_id == gtfs_route_id][0]
 
-        # For our basic scheduler, we're going to just create both trips in
-        # both directions, starting at exactly the same time, at the same
-        # frequencies. The real-world implication of this is at least
-        # 2 vehicles needed to service each route.
+            # For our basic scheduler, we're going to just create both trips in
+            # both directions, starting at exactly the same time, at the same
+            # frequencies. The real-world implication of this is at least
+            # 2 vehicles needed to service each route.
 
-        # TODO: currently just doing mon-fri services ...
-        service_period = add_service_period("monfri", schedule)
+            # The GTFS output creation logic is as follows:-
+            # For each direction, add all the trips as per the needed frequency.
+            for dir_id, direction in enumerate(route_def["directions"]):
+                headsign = direction
 
-        # The GTFS output creation logic is as follows:-
-        # For each direction, add all the trips as per the needed frequency.
-        for dir_id, direction in enumerate(route_def["directions"]):
-            headsign = direction
+                curr_period = 0    
+                while curr_period < len(serv_headways):
+                    curr_period_inc = timedelta(0)
+                    curr_period_start = serv_headways[curr_period][0]
+                    curr_period_end = serv_headways[curr_period][1]
+                    period_duration = datetime.combine(date.today(), curr_period_end) - \
+                        datetime.combine(date.today(), curr_period_start)
+                    # This logic needed to handle periods that cross midnight
+                    if period_duration < timedelta(0):
+                        period_duration += timedelta(days=1)
+                    curr_headway = timedelta(minutes=serv_headways[curr_period][2])
 
-            curr_period = 0    
-            while curr_period < len(config['headways']):
-                curr_period_inc = timedelta(0)
-                curr_period_start = config['headways'][curr_period][0]
-                curr_period_end = config['headways'][curr_period][1]
-                period_duration = datetime.combine(date.today(), curr_period_end) - \
-                    datetime.combine(date.today(), curr_period_start)
-                # This logic needed to handle periods that cross midnight
-                if period_duration < timedelta(0):
-                    period_duration += timedelta(days=1)
-                curr_headway = timedelta(minutes=config['headways'][curr_period][2])
+                    curr_start_time = curr_period_start
+                    while curr_period_inc < period_duration:
+                        trip_id = config['index'] + trip_ctr
+                        trip = route.AddTrip(
+                            schedule, 
+                            headsign = headsign,
+                            trip_id = trip_id,
+                            service_period = service_period )
 
-                curr_start_time = curr_period_start
-                while curr_period_inc < period_duration:
-                    trip_id = config['index'] + trip_ctr
-                    trip = route.AddTrip(
-                        schedule, 
-                        headsign = headsign,
-                        trip_id = trip_id,
-                        service_period = service_period )
+                        create_gtfs_trip_stoptimes(trip, curr_start_time,
+                            route_def, dir_id, route_segments_shp,
+                            stops_shp, config, schedule)
+                        trip_ctr += 1
 
-                    create_gtfs_trip_stoptimes(trip, curr_start_time,
-                        route_def, dir_id, route_segments_shp,
-                        stops_shp, config, schedule)
-                    trip_ctr += 1
+                        # Now update necessary variables ...
+                        curr_period_inc += curr_headway
+                        next_start_time = (datetime.combine(date.today(), curr_start_time) 
+                            + curr_headway).time()
+                        curr_start_time = next_start_time
 
-                    # Now update necessary variables ...
-                    curr_period_inc += curr_headway
-                    next_start_time = (datetime.combine(date.today(), curr_start_time) 
-                        + curr_headway).time()
-                    curr_start_time = next_start_time
-
-                curr_period += 1
+                    curr_period += 1
     return                            
 
 
@@ -268,12 +271,21 @@ def calc_time_on_segment(segment, stop_lyr, config):
 def get_gtfs_stop_id(stop_id, config):
     return str(config['index'] + stop_id)
 
-def get_gtfs_stop(stop_id_gtfs, schedule):
+def get_gtfs_stop_byid(stop_id_gtfs, schedule):
     try:
         stop = [s for s in schedule.GetStopList() if s.stop_id == stop_id_gtfs][0]
     except IndexError:
         print "Error: seems like stop with ID %d isn't yet in GTFS " \
             "stops DB." % stop_id_gtfs
+        sys.exit(1)
+    return stop 
+
+def get_gtfs_stop_byname(stop_name, schedule):
+    try:
+        stop = [s for s in schedule.GetStopList() if s.stop_name == stop_name][0]
+    except IndexError:
+        print "Error: seems like stop with name '%s' isn't yet in GTFS " \
+            "stops DB." % stop_name
         sys.exit(1)
     return stop 
 
@@ -335,14 +347,20 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time, route_def, dir_id, route_s
         if dir_id == 0:
             first_stop_id = segment.GetField('stop1')
             second_stop_id = segment.GetField('stop2')
+            first_stop_name = segment.GetField('stop1N')
+            second_stop_name = segment.GetField('stop2N')
         else:
             first_stop_id = segment.GetField('stop2')
             second_stop_id = segment.GetField('stop1')
+            first_stop_name = segment.GetField('stop2N')
+            second_stop_name = segment.GetField('stop1N')
             
         # Enter a stop at first stop in the segment in chosen direction.
         problems = None
-        first_stop_id_gtfs = get_gtfs_stop_id(first_stop_id, config)
-        first_stop = get_gtfs_stop(first_stop_id_gtfs, schedule)
+        # NB: temporarily searching by name.
+        #first_stop_id_gtfs = get_gtfs_stop_id(first_stop_id, config)
+        #first_stop = get_gtfs_stop_byid(first_stop_id_gtfs, schedule)
+        first_stop = get_gtfs_stop_byname(first_stop_name, schedule)
         time_sec = time_delta.days * 24*60*60 + time_delta.seconds
         first_stop_time = transitfeed.StopTime(
             problems, 
@@ -356,8 +374,8 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time, route_def, dir_id, route_s
             stop_sequence = stop_seq
             )
         trip.AddStopTimeObject(first_stop_time)
-        print "Added stop time %d for this route (ID %s) - at t %s" % (stop_seq, \
-            first_stop_id_gtfs, time_delta)
+        print "Added stop # %d for this route (stop ID %s) - at t %s" % (stop_seq, \
+            first_stop.stop_id, time_delta)
 
         # Calculate the time duration to reach the second stop and add to
         # running time 
@@ -368,8 +386,9 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time, route_def, dir_id, route_s
     # Now we've exited from the loop :- we need to now add a final stop for
     # the second stop in the final segment in the direction we're travelling.
     # second_stop_id should be set correctly from last run thru above loop.
-    final_stop_id_gtfs = get_gtfs_stop_id(second_stop_id, config)
-    final_stop = get_gtfs_stop(final_stop_id_gtfs, schedule)
+    #final_stop_id_gtfs = get_gtfs_stop_id(second_stop_id, config)
+    #final_stop = get_gtfs_stop_byid(final_stop_id_gtfs, schedule)
+    final_stop = get_gtfs_stop_byname(second_stop_name, schedule)
     time_sec = time_delta.days * 24*60*60 + time_delta.seconds
     final_stop_time = transitfeed.StopTime(
         problems, 
@@ -384,7 +403,7 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time, route_def, dir_id, route_s
         )
     trip.AddStopTimeObject(final_stop_time)
     print "Added (final) stop time %d for this route (ID %s) - at t %s" % (stop_seq, \
-        final_stop_id_gtfs, time_delta)
+        final_stop.stop_id, time_delta)
     return    
 
 
