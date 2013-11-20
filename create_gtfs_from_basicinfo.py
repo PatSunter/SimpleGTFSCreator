@@ -76,17 +76,11 @@ settings = {
     }
 }
 
-#Fake data for testing - later will want to read these from a Spatial DB,
-#  e.g. in PosgreSQL with Spatial addon or via shapefiles - as an output from QGIS.
-
-### Hmmm - perhaps these should be Structs?
-### Or should I keep it in the "pseudo-DB" form for now in anticipation of
-###  reading from shapefiles later anyway
-
+# No longer needed :- this is now a sample.
 train_route_defs = [
     {
         "name": "Craigieburn",
-        "directions": ["City", "Craigieburn"], #Could potentially do these
+        "directions": ("City", "Craigieburn"), #Could potentially do these
             #based on first and last stops ... but define as same for each line ...
         "segments": [0, 1, 2],
     } 
@@ -95,6 +89,23 @@ train_route_defs = [
 #"Newmarket Station",
 #"Kensington Station",
 #"North Melbourne Station"
+
+def read_route_defs(csv_file_name):
+    route_defs = []
+    csv_file = open(csv_file_name, 'r')
+    reader = csv.reader(csv_file, delimiter=';', quotechar="'") 
+    # skip headings
+    reader.next()
+    for ii, row in enumerate(reader):
+        route_def = {}
+        route_def['name'] = row[0]
+        dir1 = row[1]
+        dir2 = row[2]
+        route_def['directions'] = (dir1, dir2)
+        segments_str = row[3].split(',')
+        route_def['segments'] = [int(segstr) for segstr in segments_str]
+        route_defs.append(route_def)
+    return route_defs
 
 def create_gtfs_route_entries(route_defs, config, schedule):
     print "%s() called." % inspect.stack()[0][3]
@@ -407,18 +418,18 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time, route_def, dir_id, route_s
     return    
 
 
-def process_data(input_segments_fname, input_stops_fname, config, output):
+def process_data(route_defs_csv_fname, input_segments_fname, input_stops_fname, config, output):
     # Create our schedule
     schedule = transitfeed.Schedule()
     # Agency
     schedule.AddAgency(config['name'], config['url'], "Australia/Melbourne", agency_id=config['id'])
 
     # Now see if we can open both needed shape files correctly
-    stops_shp = osgeo.ogr.Open(input_stops_fname)
+    route_defs = read_route_defs(route_defs_csv_fname)
     route_segments_shp = osgeo.ogr.Open(input_segments_fname)
+    stops_shp = osgeo.ogr.Open(input_stops_fname)
     # Now do actual data processing
-    # TODO:- train_route_defs is hacked for now.
-    create_gtfs_route_entries(train_route_defs, config, schedule)
+    create_gtfs_route_entries(route_defs, config, schedule)
     create_gtfs_stop_entries(stops_shp, config, schedule)
     create_gtfs_trips_stoptimes(train_route_defs, route_segments_shp,
         stops_shp, config, schedule)
@@ -433,6 +444,8 @@ def process_data(input_segments_fname, input_stops_fname, config, output):
 if __name__ == "__main__":
 
     parser = OptionParser()
+    parser.add_option('--routedefs', dest='routedefs', 
+        help='CSV file listing name, directions, and segments of each route.')
     parser.add_option('--segments', dest='inputsegments', help='Shapefile of line segments.')
     parser.add_option('--stops', dest='inputstops', help='Shapefile of stops.')
     parser.add_option('--service', dest='service', help="Should be 'train', 'tram' or 'bus'.")
@@ -440,6 +453,9 @@ if __name__ == "__main__":
     parser.set_defaults(output='google_transit.zip')
     (options, args) = parser.parse_args()
 
+    if options.routedefs is None:
+        parser.print_help()
+        parser.error("No route definitions CSV file path given.") 
     if options.inputsegments is None:
         parser.print_help()
         parser.error("No segments shapefile path given.") 
@@ -452,4 +468,5 @@ if __name__ == "__main__":
 
     config = settings[options.service]
 
-    process_data(options.inputsegments, options.inputstops, config, options.output)
+    process_data(options.routedefs, options.inputsegments, options.inputstops,
+        config, options.output)

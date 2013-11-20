@@ -13,5 +13,5 @@ Dependent libraries:
 Sample usage:
 -------------
 
-./create_gtfs_from_basicinfo.py --output=output/google_transit.zip --segments=sample_input/Craig-Line-Test.shp --stops=sample_input/Craig-stops-clip.shp --service=train
+./create_gtfs_from_basicinfo.py --routedefs=sample_input/Craig-routes.csv --segments=sample_input/Craig-Line-Test.shp --stops=sample_input/Craig-stops-clip.shp --service=train --output=output/google_transit.zip 
  
