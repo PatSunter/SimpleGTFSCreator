@@ -431,7 +431,7 @@ def process_data(route_defs_csv_fname, input_segments_fname, input_stops_fname, 
     # Now do actual data processing
     create_gtfs_route_entries(route_defs, config, schedule)
     create_gtfs_stop_entries(stops_shp, config, schedule)
-    create_gtfs_trips_stoptimes(train_route_defs, route_segments_shp,
+    create_gtfs_trips_stoptimes(route_defs, route_segments_shp,
         stops_shp, config, schedule)
     # Now close the shape files.
     stops_shp = None
