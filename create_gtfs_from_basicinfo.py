@@ -79,6 +79,7 @@ settings = {
         'url': 'http://www.bze.org.au',
         'system': 'Subway',
         'avespeed': 65,
+        'services_info': DEFAULT_SERVICE_INFO,
         'id': 30,
         'index': 3000000,
     },
@@ -87,6 +88,7 @@ settings = {
         'url': 'http://www.bze.org.au',
         'system': 'Tram',
         'avespeed': 35,
+        'services_info': DEFAULT_SERVICE_INFO,
         'id': 32,
         'index': 3200000,
     },
@@ -95,6 +97,7 @@ settings = {
         'url': 'http://www.bze.org.au',
         'system': 'Bus',
         'avespeed': 30,
+        'services_info': DEFAULT_SERVICE_INFO,
         'id': 34,
         'index': 3400000,
     }
@@ -196,7 +199,6 @@ def add_service_period(days_week_str, schedule):
     service_period = transitfeed.ServicePeriod(id=days_week_str)
     service_period.SetStartDate(START_DATE_STR)
     service_period.SetEndDate(END_DATE_STR)
-
     # Set the day of week times
     if days_week_str == 'monthur':
         service_period.SetDayOfWeekHasService(0)
@@ -213,7 +215,6 @@ def add_service_period(days_week_str, schedule):
         service_period.SetDayOfWeekHasService(6)
     else:
         print("Error: Timetable %s not defined" % days_week_str)
-
     schedule.AddServicePeriodObject(service_period, validate=False)
     return service_period
 
@@ -228,35 +229,35 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp, confi
 
     # Initialise trip_id and counter
     trip_ctr = 0
-    # TODO: force this as a default for now. Possible we might want to convert
-    # this to a database or configurable per-route for now ...
-    services_info = SPARSE_SERVICE_INFO
-    for serv_period, serv_headways in services_info:
-        print "Handing service period '%s'" % (serv_period)
-        service_period = add_service_period(serv_period, schedule)
-        for ii, route_def in enumerate(route_defs):
-            print "Adding trips and stops for route '%s'" % (route_def['name'])
-            gtfs_route_id = str(config['index'] + ii)
-            #Re-grab the route entry from our GTFS schedule
-            route = [r for r in schedule.GetRouteList() if r.route_id == gtfs_route_id][0]
-
-            # For our basic scheduler, we're going to just create both trips in
-            # both directions, starting at exactly the same time, at the same
-            # frequencies. The real-world implication of this is at least
-            # 2 vehicles needed to service each route.
-
-            # The GTFS output creation logic is as follows:-
-            # For each direction, add all the trips as per the needed frequency.
-            for dir_id, direction in enumerate(route_def["directions"]):
-                headsign = direction
-                # Pre-calculate the stops list and cumulative time passed at
-                # each stop along the route just once per route, as this is a
-                # moderately expensive operation involving accessing the shape
-                # files etc - so we don't want to do this inside the inner
-                # loop.
-                stops_timedeltas = build_stop_list_and_timedeltas(
-                    route_def, dir_id, route_segments_shp, stops_shp,
-                    config, schedule)
+    # Do routes and directions as outer loops rather than service periods - as 
+    # allows maximal pre-calculation
+    for ii, route_def in enumerate(route_defs):
+        print "Adding trips and stops for route '%s'" % (route_def['name'])
+        gtfs_route_id = str(config['index'] + ii)
+        #Re-grab the route entry from our GTFS schedule
+        route = [r for r in schedule.GetRouteList() if r.route_id == gtfs_route_id][0]
+        # For our basic scheduler, we're going to just create both trips in
+        # both directions, starting at exactly the same time, at the same
+        # frequencies. The real-world implication of this is at least
+        # 2 vehicles needed to service each route.
+        for dir_id, direction in enumerate(route_def["directions"]):
+            headsign = direction
+            # Pre-calculate the stops list and cumulative time passed at
+            # each stop along the route just once per route, as this is a
+            # moderately expensive operation involving accessing the shape
+            # files etc - so do this just once per route and direction.
+            stops_timedeltas = build_stop_list_and_timedeltas(
+                route_def, dir_id, route_segments_shp, stops_shp,
+                config, schedule)
+            # TODO: Possible we might want to convert
+            # this to a configurable per-route later ...
+            services_info = config['services_info']
+            for serv_period, serv_headways in services_info:
+                print "Handing service period '%s'" % (serv_period)
+                try:
+                    gtfs_period = schedule.GetServicePeriod(serv_period)
+                except KeyError:    
+                    gtfs_period = add_service_period(serv_period, schedule)
 
                 curr_period = 0    
                 while curr_period < len(serv_headways):
@@ -277,18 +278,16 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp, confi
                             schedule, 
                             headsign = headsign,
                             trip_id = trip_id,
-                            service_period = service_period )
+                            service_period = gtfs_period )
 
                         create_gtfs_trip_stoptimes(trip, curr_start_time,
                             route_def, stops_timedeltas, config, schedule)
                         trip_ctr += 1
-
                         # Now update necessary variables ...
                         curr_period_inc += curr_headway
                         next_start_time = (datetime.combine(date.today(), curr_start_time) 
                             + curr_headway).time()
                         curr_start_time = next_start_time
-
                     curr_period += 1
     return                            
 
