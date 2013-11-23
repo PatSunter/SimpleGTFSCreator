@@ -7,6 +7,7 @@ import os
 import re
 import csv
 import inspect
+import copy
 from datetime import datetime, date, time, timedelta
 from optparse import OptionParser
 import pyproj
@@ -183,8 +184,9 @@ def create_gtfs_stop_entries(stops_shapefile, config, schedule):
             lat = lat,
             lng = lng,
         )
-        print "Adding stop with ID %s, name '%s', lat,long of (%3f,%3f)" % \
-            (stop_id_gtfs, stop_name, lat, lng)
+        if VERBOSE:
+            print "Adding stop with ID %s, name '%s', lat,long of (%3f,%3f)" % \
+                (stop_id_gtfs, stop_name, lat, lng)
         schedule.AddStopObject(stop)
     # See http://gis.stackexchange.com/questions/76683/python-ogr-nested-loop-only-loops-once
     layer.ResetReading() # Necessary as we need to loop thru again later
@@ -247,6 +249,14 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp, confi
             # For each direction, add all the trips as per the needed frequency.
             for dir_id, direction in enumerate(route_def["directions"]):
                 headsign = direction
+                # Pre-calculate the stops list and cumulative time passed at
+                # each stop along the route just once per route, as this is a
+                # moderately expensive operation involving accessing the shape
+                # files etc - so we don't want to do this inside the inner
+                # loop.
+                stops_timedeltas = build_stop_list_and_timedeltas(
+                    route_def, dir_id, route_segments_shp, stops_shp,
+                    config, schedule)
 
                 curr_period = 0    
                 while curr_period < len(serv_headways):
@@ -270,8 +280,7 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp, confi
                             service_period = service_period )
 
                         create_gtfs_trip_stoptimes(trip, curr_start_time,
-                            route_def, dir_id, route_segments_shp,
-                            stops_shp, config, schedule)
+                            route_def, stops_timedeltas, config, schedule)
                         trip_ctr += 1
 
                         # Now update necessary variables ...
@@ -390,20 +399,17 @@ def get_stop_order(segment, next_seg):
         first_stop_name, second_stop_name = seg_stop_name_a, seg_stop_name_b
     return first_stop_name, second_stop_name
 
-def create_gtfs_trip_stoptimes(trip, trip_start_time, route_def, dir_id, route_segments_shp, stops_shp,
-        config, schedule):
+def build_stop_list_and_timedeltas(route_def, dir_id, route_segments_shp,
+        stops_shp, config, schedule):
 
-    if VERBOSE:
-        print "\n%s() called on route '%s', trip_id = %d, trip start time %s"\
-            % (inspect.stack()[0][3], route_def["name"], trip.trip_id, str(trip_start_time))
-
+    stops_timedeltas = []
     route_segments_lyr = route_segments_shp.GetLayer(0)
     stops_lyr = stops_shp.GetLayer(0)
 
     if len(route_def['segments']) == 0:
-        print "Warning: for route name '%s', no route segments defined " \
-            "skipping." % route_def["name"]
-        return
+        print "Warning: for route name '%s', no route segments defined." \
+            % route_def["name"]
+        return []
 
     # If direction ID is 1 - generally "away from city" - create an list in reverse
     #  stop id order.
@@ -417,8 +423,7 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time, route_def, dir_id, route_s
     # We will create the stopping time object as a timedelta, as this way it will handle
     # trips that cross midnight the way GTFS requires (as a number that can increases past
     # 24:00 hours, rather than ticking back to 00:00)
-    time_delta = datetime.combine(date.today(), trip_start_time) - \
-        datetime.combine(date.today(), time(0))
+    cumulative_time = timedelta(0)
 
     stop_seq = 0
     for seg_ctr, segment_id in enumerate(segments):
@@ -446,33 +451,16 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time, route_def, dir_id, route_s
             first_stop_name = prev_second_stop_name
             second_stop_name = get_other_stop_name(segment, first_stop_name)
 
-        # Enter a stop at first stop in the segment in chosen direction.
-        problems = None
         # NB: temporarily searching by name.
         #first_stop_id_gtfs = get_gtfs_stop_id(first_stop_id, config)
         #first_stop = get_gtfs_stop_byid(first_stop_id_gtfs, schedule)
         first_stop = get_gtfs_stop_byname(first_stop_name, schedule)
-        time_sec = time_delta.days * 24*60*60 + time_delta.seconds
-        first_stop_time = transitfeed.StopTime(
-            problems, 
-            first_stop,
-            pickup_type = 0, # Regularly scheduled pickup 
-            drop_off_type = 0, # Regularly scheduled drop off
-            shape_dist_traveled = None, 
-            arrival_secs = time_sec,
-            departure_secs = time_sec, 
-            stop_time = time_sec, 
-            stop_sequence = stop_seq
-            )
-        trip.AddStopTimeObject(first_stop_time)
-        if VERBOSE:
-            print "Added stop # %d for this route (stop ID %s) - at t %s" % (stop_seq, \
-                first_stop.stop_id, time_delta)
+        stops_timedeltas.append((first_stop,copy.copy(cumulative_time)))
 
         # Calculate the time duration to reach the second stop and add to
         # running time 
         time_inc = calc_time_on_segment(segment, stops_lyr, config)
-        time_delta += time_inc
+        cumulative_time += time_inc
         stop_seq += 1
         # Save this to help with calculations in subsequent steps
         prev_second_stop_name = second_stop_name
@@ -483,22 +471,53 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time, route_def, dir_id, route_s
     #final_stop_id_gtfs = get_gtfs_stop_id(second_stop_id, config)
     #final_stop = get_gtfs_stop_byid(final_stop_id_gtfs, schedule)
     final_stop = get_gtfs_stop_byname(second_stop_name, schedule)
-    time_sec = time_delta.days * 24*60*60 + time_delta.seconds
-    final_stop_time = transitfeed.StopTime(
-        problems, 
-        final_stop,
-        pickup_type = 0, # Regularly scheduled pickup 
-        drop_off_type = 0, # Regularly scheduled drop off
-        shape_dist_traveled = None, 
-        arrival_secs = time_sec,
-        departure_secs = time_sec, 
-        stop_time = time_sec, 
-        stop_sequence = stop_seq
-        )
-    trip.AddStopTimeObject(final_stop_time)
+    stops_timedeltas.append((final_stop,copy.copy(cumulative_time)))
+
+    return stops_timedeltas
+
+def create_gtfs_trip_stoptimes(trip, trip_start_time, route_def, stops_timedeltas, config, schedule):
+    """Since refactoring, this now just processes the results of list in
+    stops_timedeltas, doesn't access the shapefiles directly at all."""
+
     if VERBOSE:
-        print "Added (final) stop time %d for this route (ID %s) - at t %s" % (stop_seq, \
-            final_stop.stop_id, time_delta)
+        print "\n%s() called on route '%s', trip_id = %d, trip start time %s"\
+            % (inspect.stack()[0][3], route_def["name"], trip.trip_id, str(trip_start_time))
+
+    if len(route_def['segments']) == 0:
+        print "Warning: for route name '%s', no route segments defined " \
+            "skipping." % route_def["name"]
+        return
+
+    # We will create the stopping time object as a timedelta, as this way it will handle
+    # trips that cross midnight the way GTFS requires (as a number that can increases past
+    # 24:00 hours, rather than ticking back to 00:00)
+    start_time_delta = datetime.combine(date.today(), trip_start_time) - \
+        datetime.combine(date.today(), time(0))
+    for stop_seq, stop_timedelta in enumerate(stops_timedeltas):
+        # Enter a stop at first stop in the segment in chosen direction.
+        problems = None
+        # NB: temporarily searching by name.
+        gtfs_stop = stop_timedelta[0]
+        cumulative_time = stop_timedelta[1]
+        # Now need to add this to trip start time to get it as a 'daily'
+        # time_delta, suited for GTFS.
+        stop_time_delta = start_time_delta + cumulative_time
+        time_sec = stop_time_delta.days * 24*60*60 + stop_time_delta.seconds
+        gtfs_stop_time = transitfeed.StopTime(
+            problems, 
+            gtfs_stop,
+            pickup_type = 0, # Regularly scheduled pickup 
+            drop_off_type = 0, # Regularly scheduled drop off
+            shape_dist_traveled = None, 
+            arrival_secs = time_sec,
+            departure_secs = time_sec, 
+            stop_time = time_sec, 
+            stop_sequence = stop_seq
+            )
+        trip.AddStopTimeObject(gtfs_stop_time)
+        if VERBOSE:
+            print "Added stop # %d for this route (stop ID %s) - at t %s" % (stop_seq, \
+                gtfs_stop.stop_id, stop_time_delta)
     return    
 
 
