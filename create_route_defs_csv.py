@@ -67,65 +67,81 @@ def order_based_on_links(rsegtuples, seglinks):
 
     return ordered_segtuples
 
-fname = "/Users/pds_phd/Dropbox/PhD-TechnicalProjectWork/OSSTIP_BZE/Melbourne_GIS_NetworkDataWork/BZE_New_Network/Bus_lines_segments-HerveVersion-2/bus-edges/bus-edges.shp"
-shapefile = osgeo.ogr.Open(fname)
-layer = shapefile.GetLayer(0)
-all_routes = {}
-for feature in layer:
-    seg_id = int(feature.GetField("id"))
-    seg_routes = feature.GetField("route_list")
-    pt_a = feature.GetField("pt_a")
-    pt_b = feature.GetField("pt_b")
-    seg_rlist = seg_routes.split(',')
-    segtuple = (seg_id, pt_a, pt_b)
-    for route in seg_rlist:
-        if route not in all_routes:
-            all_routes[route] = [segtuple]
+def process_all_routes(input_shp_fname, output_fname):
+    shapefile = osgeo.ogr.Open(input_shp_fname)
+    layer = shapefile.GetLayer(0)
+    all_routes = {}
+    for feature in layer:
+        seg_id = int(feature.GetField("id"))
+        seg_routes = feature.GetField("route_list")
+        pt_a = feature.GetField("pt_a")
+        pt_b = feature.GetField("pt_b")
+        seg_rlist = seg_routes.split(',')
+        segtuple = (seg_id, pt_a, pt_b)
+        for route in seg_rlist:
+            if route not in all_routes:
+                all_routes[route] = [segtuple]
+            else:
+                all_routes[route].append(segtuple)
+
+    #for rname, rsegs in all_routes.iteritems():
+    #    print "For Route '%s': segments are %s" % (rname, rsegs)    
+
+    print "(A total of %d routes.)" % len(all_routes)
+
+    # Now order each route properly ...
+    # for each route - find unique stop names 
+    routes_ordered = {}
+    route_dirs = {}
+    for rname, rsegtuples in all_routes.iteritems():
+
+        if len(rsegtuples) == 1:
+            routes_ordered[rname] = rsegtuples
+            continue
+        seglinks = build_seg_links(rsegtuples)
+        ordered_segtuples = order_based_on_links(rsegtuples, seglinks)
+        routes_ordered[rname] = ordered_segtuples
+        # Now create the directions
+        linkstop = segs_link(ordered_segtuples[0], ordered_segtuples[1])
+        if ordered_segtuples[0][1] != linkstop:
+            startstop = ordered_segtuples[0][1]
         else:
-            all_routes[route].append(segtuple)
+            startstop = ordered_segtuples[0][2]
+        linkstop = segs_link(ordered_segtuples[-2], ordered_segtuples[-1])
+        if ordered_segtuples[-1][1] != linkstop:
+            endstop = ordered_segtuples[-1][1]
+        else:
+            endstop = ordered_segtuples[-1][2]
+        dir1 = "%s->%s" % (startstop, endstop)
+        dir2 = "%s->%s" % (endstop, startstop)
+        route_dirs[rname] = (dir1, dir2)
 
-#for rname, rsegs in all_routes.iteritems():
-#    print "For Route '%s': segments are %s" % (rname, rsegs)    
+    routesfile = open(output_fname, 'w')
+    rwriter = csv.writer(routesfile, delimiter=';')
+    rwriter.writerow(['Route','dir1','dir2','Segments'])
 
-print "(A total of %d routes.)" % len(all_routes)
+    for rname, rsegtuples in routes_ordered.iteritems():
+        segstrs = [str(segtuple[0]) for segtuple in rsegtuples]
+        segstr = ','.join(segstrs)
+        dirs = route_dirs[rname]
+        rwriter.writerow([rname,dirs[0],dirs[1],segstr])
 
-# Now order each route properly ...
-# for each route - find unique stop names 
-routes_ordered = {}
-route_dirs = {}
-for rname, rsegtuples in all_routes.iteritems():
+    routesfile.close()
+    print "Wrote output to %s" % (output_fname)
 
-    if len(rsegtuples) == 1:
-        routes_ordered[rname] = rsegtuples
-        continue
-    seglinks = build_seg_links(rsegtuples)
-    ordered_segtuples = order_based_on_links(rsegtuples, seglinks)
-    routes_ordered[rname] = ordered_segtuples
-    # Now create the directions
-    linkstop = segs_link(ordered_segtuples[0], ordered_segtuples[1])
-    if ordered_segtuples[0][1] != linkstop:
-        startstop = ordered_segtuples[0][1]
-    else:
-        startstop = ordered_segtuples[0][2]
-    linkstop = segs_link(ordered_segtuples[-2], ordered_segtuples[-1])
-    if ordered_segtuples[-1][1] != linkstop:
-        endstop = ordered_segtuples[-1][1]
-    else:
-        endstop = ordered_segtuples[-1][2]
-    dir1 = "%s->%s" % (startstop, endstop)
-    dir2 = "%s->%s" % (endstop, startstop)
-    route_dirs[rname] = (dir1, dir2)
+if __name__ == "__main__":    
+    parser = OptionParser()
+    parser.add_option('--input_shp', dest='input_shp',
+        help='Shape file containing bus segments, which list routes in each'\
+            ' segment.')
+    parser.add_option('--output_csv', dest='output_csv',
+        help='Output file name you want to store CSV of route segments in'\
+            ' (suggest should end in .csv)')
+    parser.set_defaults(output_csv='route_defs.csv')        
+    (options, args) = parser.parse_args()
 
-routesfilename = 'route_defs.csv'
-routesfile = open(routesfilename, 'w')
-rwriter = csv.writer(routesfile, delimiter=';')
-rwriter.writerow(['Route','dir1','dir2','Segments'])
+    if options.input_shp is None:
+        parser.print_help()
+        parser.error("No input shape file path containing route infos given.")
 
-for rname, rsegtuples in routes_ordered.iteritems():
-    segstrs = [str(segtuple[0]) for segtuple in rsegtuples]
-    segstr = ','.join(segstrs)
-    dirs = route_dirs[rname]
-    rwriter.writerow([rname,dirs[0],dirs[1],segstr])
-
-routesfile.close()
-print "Wrote output to %s" % (routesfilename)
+    process_all_routes(options.input_shp, options.output_csv)
