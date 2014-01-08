@@ -30,10 +30,12 @@ SEG_STOP_2_NAME_FIELD = "pt_b"
 #ROUTE_DIST_RATIO_TO_KM = 1
 SEG_ROUTE_DIST_FIELD = 'leg_length'
 ROUTE_DIST_RATIO_TO_KM = 1000
+# For Pat's test:- these are "Name"
+STOP_NAME_FIELD = "ID"
 
 # These are plain strings, as required by the transitfeed library
 START_DATE_STR = '20130101'
-END_DATE_STR = '20131231'
+END_DATE_STR = '20141231'
 
 #Format:
 # avespeed: average speed (km/h)
@@ -344,11 +346,14 @@ def get_gtfs_stop_byname(stop_name, schedule):
 
 def get_stop_feature_name(feature):
     # fname = feature.GetField('Name') 
-    stop_id = feature.GetField('ID')
+    stop_id = feature.GetField(STOP_NAME_FIELD)
     if stop_id is None:
         stop_name = None
-    else:    
-        stop_name = "B"+str(int(stop_id))
+    else:
+        if type(stop_id) == str:
+            stop_name = stop_id
+        else:    
+            stop_name = "B"+str(int(stop_id))
     return stop_name
 
 def get_stop_feature(stop_name, stop_lyr):
