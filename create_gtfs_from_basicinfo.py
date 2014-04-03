@@ -21,8 +21,8 @@ import transitfeed
 VERBOSE = False
 
 # These determine fields within the GIS
-# For Pat's test:- "avgspeed".
-SEG_AVE_SPEED_FIELD = "avg_speed"
+SEG_PEAK_SPEED_FIELD = "peak_speed"
+SEG_FREE_SPEED_FIELD = "free_speed"
 # For Pat's test:- these are "Stop1N", "Stop2N"
 SEG_STOP_1_NAME_FIELD = "pt_a"
 SEG_STOP_2_NAME_FIELD = "pt_b"
@@ -61,13 +61,19 @@ SPARSE_SERVICE_INFO = [
     ("monfri", sparse_test_headways)
     ]
 
+# Format of columns:-
+# 0: start time of period
+# 1: end time of period
+# 2: headway during period (time between services)
+# 3: Is this a peak period? True/False (used to decide speed in congested
+# areas).
 default_service_headways = [
-    (time(05,00), time(07,30), 20),
-    (time(07,30), time(10,00), 5),
-    (time(10,00), time(16,00), 10),
-    (time(16,00), time(18,30), 5),
-    (time(18,30), time(23,00), 10),
-    (time(23,00), time(02,00), 20)
+    (time(05,00), time(07,30), 20, False),
+    (time(07,30), time(10,00), 5, True), 
+    (time(10,00), time(16,00), 10, False),
+    (time(16,00), time(18,30), 5, True),
+    (time(18,30), time(23,00), 10, False),
+    (time(23,00), time(02,00), 20, False)
     ]
 
 DEFAULT_SERVICE_INFO = [
@@ -78,6 +84,7 @@ DEFAULT_SERVICE_INFO = [
 settings = {
     'train': {
         'name': 'Metro Trains - Upgraded',
+        'loc': 'Australia/Melbourne',
         'url': 'http://www.bze.org.au',
         'system': 'Subway',
         'avespeed': 65,
@@ -87,6 +94,7 @@ settings = {
     },
     'tram': {
         'name': 'Yarra Trams - Upgraded',
+        'loc': 'Australia/Melbourne',
         'url': 'http://www.bze.org.au',
         'system': 'Tram',
         'avespeed': 35,
@@ -96,6 +104,7 @@ settings = {
     },
     'bus': {
         'name': 'Melbourne Bus - Upgraded',
+        'loc': 'Australia/Melbourne',
         'url': 'http://www.bze.org.au',
         'system': 'Bus',
         'avespeed': 30,
@@ -136,20 +145,20 @@ def read_route_defs(csv_file_name):
         route_defs.append(route_def)
     return route_defs
 
-def create_gtfs_route_entries(route_defs, config, schedule):
+def create_gtfs_route_entries(route_defs, mode_config, schedule):
     print "%s() called." % inspect.stack()[0][3]
     # Routes
     for ii, route_def in enumerate(route_defs):
         route_long_name = route_def["name"]
         route_short_name = None
         route_description = None
-        route_id = str(config['index'] + ii)
+        route_id = str(mode_config['index'] + ii)
 
         # Add our route
         route = transitfeed.Route(
             short_name = route_short_name, 
             long_name = route_long_name,
-            route_type = config['system'],
+            route_type = mode_config['system'],
             route_id = route_id
         )
 
@@ -158,7 +167,7 @@ def create_gtfs_route_entries(route_defs, config, schedule):
         schedule.AddRouteObject(route)
 
 
-def create_gtfs_stop_entries(stops_shapefile, config, schedule):
+def create_gtfs_stop_entries(stops_shapefile, mode_config, schedule):
     """This function requires that in the stops shapefile, there is an
     attribute called 'Name' listing the name of the stop. (Note: it is ok if
     this is actually just a number, but it will be treated as a string.)"""
@@ -175,7 +184,7 @@ def create_gtfs_stop_entries(stops_shapefile, config, schedule):
         stop_name = "B"+str(int(stop_id))
         stop_desc = None
         stop_code = None
-        stop_id_gtfs = str(config['index'] + stop_cnt)
+        stop_id_gtfs = str(mode_config['index'] + stop_cnt)
         geom = stop_feature.GetGeometryRef()
         lng = geom.GetX()
         lat = geom.GetY() 
@@ -221,7 +230,8 @@ def add_service_period(days_week_str, schedule):
     return service_period
 
 
-def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp, config, schedule):
+def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
+        mode_config, schedule, use_seg_speeds):
     """This function creates the GTFS trip and stoptime entries for every
     trip.
 
@@ -235,7 +245,7 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp, confi
     # allows maximal pre-calculation
     for ii, route_def in enumerate(route_defs):
         print "Adding trips and stops for route '%s'" % (route_def['name'])
-        gtfs_route_id = str(config['index'] + ii)
+        gtfs_route_id = str(mode_config['index'] + ii)
         #Re-grab the route entry from our GTFS schedule
         route = [r for r in schedule.GetRouteList() if r.route_id == gtfs_route_id][0]
         # For our basic scheduler, we're going to just create both trips in
@@ -248,12 +258,12 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp, confi
             # each stop along the route just once per route, as this is a
             # moderately expensive operation involving accessing the shape
             # files etc - so do this just once per route and direction.
-            stops_timedeltas = build_stop_list_and_timedeltas(
+            stops_timedeltas = build_stop_list_and_seg_info_along_route(
                 route_def, dir_id, route_segments_shp, stops_shp,
-                config, schedule)
+                mode_config, schedule)
             # TODO: Possible we might want to convert
             # this to a configurable per-route later ...
-            services_info = config['services_info']
+            services_info = mode_config['services_info']
             for serv_period, serv_headways in services_info:
                 print "Handing service period '%s'" % (serv_period)
                 try:
@@ -275,7 +285,7 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp, confi
 
                     curr_start_time = curr_period_start
                     while curr_period_inc < period_duration:
-                        trip_id = config['index'] + trip_ctr
+                        trip_id = mode_config['index'] + trip_ctr
                         trip = route.AddTrip(
                             schedule, 
                             headsign = headsign,
@@ -283,7 +293,8 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp, confi
                             service_period = gtfs_period )
 
                         create_gtfs_trip_stoptimes(trip, curr_start_time,
-                            route_def, stops_timedeltas, config, schedule)
+                            route_def, stops_timedeltas, mode_config,
+                            schedule, use_seg_speeds)
                         trip_ctr += 1
                         # Now update necessary variables ...
                         curr_period_inc += curr_headway
@@ -303,28 +314,34 @@ def calc_distance_km(segment):
 
 
 
-def calc_time_on_segment(segment, stop_lyr, config):
+# TODO:- this should new be called within the actual timetable part, due to
+# now speed being time-dependent.
+def calc_time_on_segment(segment, stop_lyr, mode_config, use_seg_speeds, peak_status):
     """Calculates travel time between two stops. Current algorithm is based on
     an average speed on that segment, and physical distance between them."""
-    avespeed = config['avespeed']
-    #avespeed = segment.GetField(SEG_AVE_SPEED_FIELD)
+    if use_seg_speeds is True:
+        if peak_status is True:
+            seg_speed = segment.GetField(SEG_PEAK_SPEED_FIELD)
+        else:
+            seg_speed = segment.GetField(SEG_FREE_SPEED_FIELD)
+    else:    
+        seg_speed = mode_config['avespeed']
 
-    # TODO: update this from just reading the stops list to using the shapefile.
     s1_name = segment.GetField(SEG_STOP_1_NAME_FIELD)
     s2_name = segment.GetField(SEG_STOP_2_NAME_FIELD)
 
     s1 = get_stop_feature(s1_name, stop_lyr)
     s2 = get_stop_feature(s2_name, stop_lyr)
     distance_km = calc_distance_km(segment)
-    time_hrs = distance_km / avespeed
+    time_hrs = distance_km / seg_speed
     time_inc = timedelta(hours = time_hrs)
     # Now round to nearest second
     time_inc = time_inc - timedelta(microseconds=time_inc.microseconds) + \
         timedelta(seconds=round(time_inc.microseconds/1e6))
     return time_inc
     
-def get_gtfs_stop_id(stop_id, config):
-    return str(config['index'] + stop_id)
+def get_gtfs_stop_id(stop_id, mode_config):
+    return str(mode_config['index'] + stop_id)
 
 def get_gtfs_stop_byid(stop_id_gtfs, schedule):
     try:
@@ -401,10 +418,20 @@ def get_stop_order(segment, next_seg):
         first_stop_name, second_stop_name = seg_stop_name_a, seg_stop_name_b
     elif seg_stop_name_b == next_seg_stop_name_b:    
         first_stop_name, second_stop_name = seg_stop_name_a, seg_stop_name_b
+    else:
+        s_name = segment.GetField(STOP_NAME_FIELD)
+        next_name = next_seg.GetField(STOP_NAME_FIELD) 
+        print "Error, in segment '%s', next seg is '%s', "\
+            "stop a is '%s', stop b is '%s', "\
+            "next seg stop a is '%s', stop b is '%s', "\
+            "couldn't work out stop order."\
+            % (s_name, next_name, seg_stop_name_a, seg_stop_name_b, \
+               next_seg_stop_name_a, next_seg_stop_name_b)
+        sys.exit(1)       
     return first_stop_name, second_stop_name
 
-def build_stop_list_and_timedeltas(route_def, dir_id, route_segments_shp,
-        stops_shp, config, schedule):
+def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_shp,
+        stops_shp, mode_config, schedule):
 
     stops_timedeltas = []
     route_segments_lyr = route_segments_shp.GetLayer(0)
@@ -456,14 +483,17 @@ def build_stop_list_and_timedeltas(route_def, dir_id, route_segments_shp,
             second_stop_name = get_other_stop_name(segment, first_stop_name)
 
         # NB: temporarily searching by name.
-        #first_stop_id_gtfs = get_gtfs_stop_id(first_stop_id, config)
+        #first_stop_id_gtfs = get_gtfs_stop_id(first_stop_id, mode_config)
         #first_stop = get_gtfs_stop_byid(first_stop_id_gtfs, schedule)
         first_stop = get_gtfs_stop_byname(first_stop_name, schedule)
         stops_timedeltas.append((first_stop,copy.copy(cumulative_time)))
 
         # Calculate the time duration to reach the second stop and add to
         # running time 
-        time_inc = calc_time_on_segment(segment, stops_lyr, config)
+        # TODO - fix! hack for now.
+        peak_status = True
+        time_inc = calc_time_on_segment(segment, stops_lyr, mode_config,
+            use_seg_speeds, peak_status)
         cumulative_time += time_inc
         stop_seq += 1
         # Save this to help with calculations in subsequent steps
@@ -472,14 +502,15 @@ def build_stop_list_and_timedeltas(route_def, dir_id, route_segments_shp,
     # Now we've exited from the loop :- we need to now add a final stop for
     # the second stop in the final segment in the direction we're travelling.
     # second_stop_id should be set correctly from last run thru above loop.
-    #final_stop_id_gtfs = get_gtfs_stop_id(second_stop_id, config)
+    #final_stop_id_gtfs = get_gtfs_stop_id(second_stop_id, mode_config)
     #final_stop = get_gtfs_stop_byid(final_stop_id_gtfs, schedule)
     final_stop = get_gtfs_stop_byname(second_stop_name, schedule)
     stops_timedeltas.append((final_stop,copy.copy(cumulative_time)))
 
     return stops_timedeltas
 
-def create_gtfs_trip_stoptimes(trip, trip_start_time, route_def, stops_timedeltas, config, schedule):
+def create_gtfs_trip_stoptimes(trip, trip_start_time, route_def,
+        stops_timedeltas, mode_config, schedule, use_seg_speeds):
     """Since refactoring, this now just processes the results of list in
     stops_timedeltas, doesn't access the shapefiles directly at all."""
 
@@ -525,21 +556,23 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time, route_def, stops_timedelta
     return    
 
 
-def process_data(route_defs_csv_fname, input_segments_fname, input_stops_fname, config, output):
+def process_data(route_defs_csv_fname, input_segments_fname,
+        input_stops_fname, mode_config, output, use_seg_speeds):
     # Create our schedule
     schedule = transitfeed.Schedule()
     # Agency
-    schedule.AddAgency(config['name'], config['url'], "Australia/Melbourne", agency_id=config['id'])
+    schedule.AddAgency(mode_config['name'], mode_config['url'],
+        mode_config['loc'], agency_id=mode_config['id'])
 
     # Now see if we can open both needed shape files correctly
     route_defs = read_route_defs(route_defs_csv_fname)
     route_segments_shp = osgeo.ogr.Open(input_segments_fname)
     stops_shp = osgeo.ogr.Open(input_stops_fname)
     # Now do actual data processing
-    create_gtfs_route_entries(route_defs, config, schedule)
-    create_gtfs_stop_entries(stops_shp, config, schedule)
+    create_gtfs_route_entries(route_defs, mode_config, schedule)
+    create_gtfs_stop_entries(stops_shp, mode_config, schedule)
     create_gtfs_trips_stoptimes(route_defs, route_segments_shp,
-        stops_shp, config, schedule)
+        stops_shp, mode_config, schedule, use_seg_speeds)
     # Now close the shape files.
     stops_shp = None
     route_segments_shp = None
@@ -547,6 +580,8 @@ def process_data(route_defs_csv_fname, input_segments_fname, input_stops_fname, 
     schedule.Validate()
     schedule.WriteGoogleTransitFeed(output)
 
+def str2bool(v):
+    return v.lower() in ("yes", "true", "t", "1")
 
 if __name__ == "__main__":
 
@@ -557,7 +592,10 @@ if __name__ == "__main__":
     parser.add_option('--stops', dest='inputstops', help='Shapefile of stops.')
     parser.add_option('--service', dest='service', help="Should be 'train', 'tram' or 'bus'.")
     parser.add_option('--output', dest='output', help='Path of output file. Should end in .zip')
-    parser.set_defaults(output='google_transit.zip')
+    parser.add_option('--usesegspeeds', dest='usesegspeeds', 
+        help='Use per-segment speeds defined in route segments shapefile? '\
+        'If false, then will just use a constant speed defined per mode.')
+    parser.set_defaults(output='google_transit.zip', usesegspeeds='false')
     (options, args) = parser.parse_args()
 
     if options.routedefs is None:
@@ -573,7 +611,9 @@ if __name__ == "__main__":
         parser.print_help()
         parser.error("Need to specify a service.")
 
-    config = settings[options.service]
+    use_seg_speeds = str2bool(options.usesegspeeds)
+
+    mode_config = settings[options.service]
 
     process_data(options.routedefs, options.inputsegments, options.inputstops,
-        config, options.output)
+        mode_config, options.output, use_seg_speeds)
