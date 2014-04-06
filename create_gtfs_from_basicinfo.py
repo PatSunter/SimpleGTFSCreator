@@ -114,19 +114,41 @@ settings = {
     }
 }
 
-# No longer needed :- this is now a sample.
-train_route_defs = [
-    {
-        "name": "Craigieburn",
-        "directions": ("City", "Craigieburn"), #Could potentially do these
-            #based on first and last stops ... but define as same for each line ...
-        "segments": [0, 1, 2],
-    } 
-    ]
-#"Ascot Vale Station",
-#"Newmarket Station",
-#"Kensington Station",
-#"North Melbourne Station"
+def calc_total_service_time_elapsed(serv_headways, curr_time):
+    first_period_start_time = serv_headways[0][0]
+    tdiff = datetime.combine(date.today(), curr_time) \
+        - datetime.combine(date.today(), first_period_start_time)
+    if tdiff < timedelta(0):
+        tdiff += timedelta(days=1)
+    return tdiff
+
+def calc_service_time_elapsed_end_period(serv_headways, period_num):
+    tdiff = calc_total_service_time_elapsed(serv_headways,
+        serv_headways[period_num][1])
+    return tdiff
+
+class Seq_Stop_Info:
+    """A small struct to store key info about a stop in the sequence of a
+    particular route, pulled from the Shapefiles, that will be later used
+    to define time to enter for a stop in actual timetable."""
+    def __init__(self, gtfs_stop):
+        self.gtfs_stop = gtfs_stop
+        self.dist_km_to_next = 0
+        self.peak_speed_next = 0
+        self.free_speed_next = 0
+
+def get_distance_km(segment):
+    # In H's script, this will be saved as an attribute in the generation
+    # phase.
+    rdist = float(segment.GetField(SEG_ROUTE_DIST_FIELD))
+    rdist = rdist / ROUTE_DIST_RATIO_TO_KM
+    return rdist
+
+def save_seq_stop_speed_info(seq_stop_info, next_segment, stops_lyr):
+    seq_stop_info.peak_speed_next = next_segment.GetField(SEG_PEAK_SPEED_FIELD)
+    seq_stop_info.free_speed_next = next_segment.GetField(SEG_FREE_SPEED_FIELD)
+    seq_stop_info.dist_km_to_next = get_distance_km(next_segment)
+    return
 
 def read_route_defs(csv_file_name):
     route_defs = []
@@ -254,15 +276,17 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
         # 2 vehicles needed to service each route.
         for dir_id, direction in enumerate(route_def["directions"]):
             headsign = direction
-            # Pre-calculate the stops list and cumulative time passed at
-            # each stop along the route just once per route, as this is a
-            # moderately expensive operation involving accessing the shape
-            # files etc - so do this just once per route and direction.
-            stops_timedeltas = build_stop_list_and_seg_info_along_route(
+            # Pre-calculate the stops list and save relevant info related to speed
+            # calculation from shapefiles for later.
+            # as this is a moderately expensive operation.
+            # This way we do this just once per route and direction.
+            prebuilt_stop_info_list = build_stop_list_and_seg_info_along_route(
                 route_def, dir_id, route_segments_shp, stops_shp,
                 mode_config, schedule)
-            # TODO: Possible we might want to convert
-            # this to a configurable per-route later ...
+            
+            # N.B.: Possible we might want to convert
+            # the services_info of headway periods to a configurable per-route later 
+            # rather than per mode...
             services_info = mode_config['services_info']
             for serv_period, serv_headways in services_info:
                 print "Handing service period '%s'" % (serv_period)
@@ -293,7 +317,8 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
                             service_period = gtfs_period )
 
                         create_gtfs_trip_stoptimes(trip, curr_start_time,
-                            route_def, stops_timedeltas, mode_config,
+                            curr_period, serv_headways,
+                            route_def, prebuilt_stop_info_list, mode_config,
                             schedule, use_seg_speeds)
                         trip_ctr += 1
                         # Now update necessary variables ...
@@ -304,36 +329,17 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
                     curr_period += 1
     return                            
 
-
-def calc_distance_km(segment):
-    # In H's script, this will be saved as an attribute in the generation
-    # phase.
-    rdist = float(segment.GetField(SEG_ROUTE_DIST_FIELD))
-    rdist = rdist / ROUTE_DIST_RATIO_TO_KM
-    return rdist
-
-
-
-# TODO:- this should new be called within the actual timetable part, due to
-# now speed being time-dependent.
-def calc_time_on_segment(segment, stop_lyr, mode_config, use_seg_speeds, peak_status):
+def calc_time_on_next_segment(seq_stop_info, mode_config, use_seg_speeds, peak_status):
     """Calculates travel time between two stops. Current algorithm is based on
     an average speed on that segment, and physical distance between them."""
     if use_seg_speeds is True:
         if peak_status is True:
-            seg_speed = segment.GetField(SEG_PEAK_SPEED_FIELD)
+            seg_speed = seq_stop_info.peak_speed_next
         else:
-            seg_speed = segment.GetField(SEG_FREE_SPEED_FIELD)
+            seg_speed = seq_stop_info.free_speed_next
     else:    
         seg_speed = mode_config['avespeed']
-
-    s1_name = segment.GetField(SEG_STOP_1_NAME_FIELD)
-    s2_name = segment.GetField(SEG_STOP_2_NAME_FIELD)
-
-    s1 = get_stop_feature(s1_name, stop_lyr)
-    s2 = get_stop_feature(s2_name, stop_lyr)
-    distance_km = calc_distance_km(segment)
-    time_hrs = distance_km / seg_speed
+    time_hrs = seq_stop_info.dist_km_to_next / float(seg_speed)
     time_inc = timedelta(hours = time_hrs)
     # Now round to nearest second
     time_inc = time_inc - timedelta(microseconds=time_inc.microseconds) + \
@@ -373,15 +379,15 @@ def get_stop_feature_name(feature):
             stop_name = "B"+str(int(stop_id))
     return stop_name
 
-def get_stop_feature(stop_name, stop_lyr):
+def get_stop_feature(stop_name, stops_lyr):
     # Just do a linear search for now.
     match_feature = None
-    for feature in stop_lyr:
+    for feature in stops_lyr:
         fname = get_stop_feature_name(feature)
         if fname == stop_name:
             match_feature = feature
             break;    
-    stop_lyr.ResetReading()        
+    stops_lyr.ResetReading()        
     return match_feature
 
 def get_route_segment(segment_id, route_segments_lyr):
@@ -433,7 +439,7 @@ def get_stop_order(segment, next_seg):
 def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_shp,
         stops_shp, mode_config, schedule):
 
-    stops_timedeltas = []
+    prebuilt_stop_info_list = []
     route_segments_lyr = route_segments_shp.GetLayer(0)
     stops_lyr = stops_shp.GetLayer(0)
 
@@ -451,20 +457,13 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
     else:
         segments = list(reversed(route_def["segments"]))
 
-    # We will create the stopping time object as a timedelta, as this way it will handle
-    # trips that cross midnight the way GTFS requires (as a number that can increases past
-    # 24:00 hours, rather than ticking back to 00:00)
-    cumulative_time = timedelta(0)
-
     stop_seq = 0
     for seg_ctr, segment_id in enumerate(segments):
-        
         segment = get_route_segment(segment_id, route_segments_lyr)
         if segment is None:
             print "Error: didn't locate segment in shapefile with given id " \
                 "%d." % (segment_id)
             sys.exit(1)    
-
         if seg_ctr == 0:
             # special case for a route with only one segment.
             if len(segments) == 1:
@@ -486,15 +485,11 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
         #first_stop_id_gtfs = get_gtfs_stop_id(first_stop_id, mode_config)
         #first_stop = get_gtfs_stop_byid(first_stop_id_gtfs, schedule)
         first_stop = get_gtfs_stop_byname(first_stop_name, schedule)
-        stops_timedeltas.append((first_stop,copy.copy(cumulative_time)))
-
-        # Calculate the time duration to reach the second stop and add to
-        # running time 
-        # TODO - fix! hack for now.
-        peak_status = True
-        time_inc = calc_time_on_segment(segment, stops_lyr, mode_config,
-            use_seg_speeds, peak_status)
-        cumulative_time += time_inc
+        s_info = Seq_Stop_Info(first_stop)
+        # We are still going to save key info now, to save accessing the
+        # shapefile layers again unnecessarily later.
+        save_seq_stop_speed_info(s_info, segment, stops_lyr)
+        prebuilt_stop_info_list.append(s_info)
         stop_seq += 1
         # Save this to help with calculations in subsequent steps
         prev_second_stop_name = second_stop_name
@@ -505,14 +500,18 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
     #final_stop_id_gtfs = get_gtfs_stop_id(second_stop_id, mode_config)
     #final_stop = get_gtfs_stop_byid(final_stop_id_gtfs, schedule)
     final_stop = get_gtfs_stop_byname(second_stop_name, schedule)
-    stops_timedeltas.append((final_stop,copy.copy(cumulative_time)))
+    s_info_final = Seq_Stop_Info(final_stop)
+    # Final stop doesn't have speed etc on segment, so leave as zero.
+    prebuilt_stop_info_list.append(s_info_final)
+    return prebuilt_stop_info_list
 
-    return stops_timedeltas
-
-def create_gtfs_trip_stoptimes(trip, trip_start_time, route_def,
-        stops_timedeltas, mode_config, schedule, use_seg_speeds):
-    """Since refactoring, this now just processes the results of list in
-    stops_timedeltas, doesn't access the shapefiles directly at all."""
+def create_gtfs_trip_stoptimes(trip, trip_start_time,
+        trip_start_period, serv_headways,
+        route_def, prebuilt_stop_info_list, mode_config, schedule, use_seg_speeds):
+    """Creates the actual stop times on a route.
+    Since Apr 2014, now needs to access curr_period and serv_headways,
+    since we are allowing for time-dependent vehicle speeds by serv period.
+    Still uses pre-calculated list of stops, segments along a route."""
 
     if VERBOSE:
         print "\n%s() called on route '%s', trip_id = %d, trip start time %s"\
@@ -523,38 +522,66 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time, route_def,
             "skipping." % route_def["name"]
         return
 
-    # We will create the stopping time object as a timedelta, as this way it will handle
+    # We will also create the stopping time object as a timedelta, as this way it will handle
     # trips that cross midnight the way GTFS requires (as a number that can increases past
     # 24:00 hours, rather than ticking back to 00:00)
     start_time_delta = datetime.combine(date.today(), trip_start_time) - \
         datetime.combine(date.today(), time(0))
-    for stop_seq, stop_timedelta in enumerate(stops_timedeltas):
+    cumulative_time_on_trip = timedelta(0)
+    # These variable needed to track change in periods for possible
+    # time-dependent vehicle speed in peak or off-peak
+    period_at_stop = trip_start_period
+    peak_status = serv_headways[period_at_stop][3]
+    time_at_stop = trip_start_time
+    end_elapsed_curr_period = calc_service_time_elapsed_end_period(serv_headways,
+        period_at_stop)
+    n_stops_on_route = len(prebuilt_stop_info_list)
+
+    for stop_seq, s_info in enumerate(prebuilt_stop_info_list):
         # Enter a stop at first stop in the segment in chosen direction.
         problems = None
-        # NB: temporarily searching by name.
-        gtfs_stop = stop_timedelta[0]
-        cumulative_time = stop_timedelta[1]
-        # Now need to add this to trip start time to get it as a 'daily'
+        # Enter the stop info now at the start. Then will add on time in this
+        # segment.
+        # Need to add cumulative time on trip start time to get it as a 'daily'
         # time_delta, suited for GTFS.
-        stop_time_delta = start_time_delta + cumulative_time
-        time_sec = stop_time_delta.days * 24*60*60 + stop_time_delta.seconds
+        stop_time_delta = start_time_delta + cumulative_time_on_trip
+        time_at_stop = (datetime.min + stop_time_delta).time()
+        time_sec_for_gtfs = stop_time_delta.days * 24*60*60 + stop_time_delta.seconds
         gtfs_stop_time = transitfeed.StopTime(
             problems, 
-            gtfs_stop,
+            s_info.gtfs_stop,
             pickup_type = 0, # Regularly scheduled pickup 
             drop_off_type = 0, # Regularly scheduled drop off
             shape_dist_traveled = None, 
-            arrival_secs = time_sec,
-            departure_secs = time_sec, 
-            stop_time = time_sec, 
+            arrival_secs = time_sec_for_gtfs,
+            departure_secs = time_sec_for_gtfs, 
+            stop_time = time_sec_for_gtfs, 
             stop_sequence = stop_seq
             )
         trip.AddStopTimeObject(gtfs_stop_time)
         if VERBOSE:
             print "Added stop # %d for this route (stop ID %s) - at t %s" % (stop_seq, \
                 gtfs_stop.stop_id, stop_time_delta)
-    return    
 
+        # Given elapsed time at stop we just added:- have we just crossed over
+        # int peak period of schedule for this mode? Will affect calc. time to next stop.
+        # N.B.: first part of check is - for last trips of the 'day' (even if after
+        # (midnite), they will may still be on the road/rails after the
+        # nominal end time of the period. In this case, just keep going
+        # in same conditions of current period.
+        serv_elapsed = calc_total_service_time_elapsed(serv_headways, time_at_stop)
+        if (period_at_stop+1 < len(serv_headways)) \
+                and serv_elapsed >= end_elapsed_curr_period:
+            period_at_stop += 1
+            peak_status = serv_headways[period_at_stop][3]
+            end_elapsed_curr_period = calc_service_time_elapsed_end_period(serv_headways,
+                period_at_stop)
+            
+        # Only have to do time inc. calculations if more stops remaining.
+        if (stop_seq+1) < n_stops_on_route:
+            time_inc = calc_time_on_next_segment(s_info, mode_config, use_seg_speeds, peak_status)
+            cumulative_time_on_trip += time_inc
+    return
 
 def process_data(route_defs_csv_fname, input_segments_fname,
         input_stops_fname, mode_config, output, use_seg_speeds):
