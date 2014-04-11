@@ -4,6 +4,7 @@ import os
 import os.path
 import re
 import sys
+import inspect
 from optparse import OptionParser
 
 import osgeo.ogr
@@ -46,7 +47,7 @@ def assign_speeds(route_segments_shp, mode_config, speed_func, speed_field_name)
     ensure_speed_field_exists(route_segments_lyr, speed_field_name)
     for seg_num, route_segment in enumerate(route_segments_lyr):
         if seg_num % 100 == 0:
-            print "Assigning distance-based speed to segment number %d" % (seg_num)
+            print "Assigning speed to segment number %d" % (seg_num)
         speed = speed_func(route_segment, mode_config)
         route_segment.SetField(speed_field_name, speed)
         # This SetFeature() call is necessary to actually write the change
@@ -58,34 +59,23 @@ def assign_speeds(route_segments_shp, mode_config, speed_func, speed_field_name)
     return
 
 
+def constant_speed_max(route_segment, mode_config):    
+    """Just return constant average speed defined for this mode."""
+    return mode_config['avespeed']
+
 def assign_free_speeds_constant(route_segments_shp, mode_config):
-    route_segments_lyr = route_segments_shp.GetLayer(0)
-    ensure_speed_field_exists(route_segments_lyr, tp_model.SEG_FREE_SPEED_FIELD)
-    free_speed = mode_config['avespeed']
-    for seg_num, route_segment in enumerate(route_segments_lyr):
-        route_segment.SetField(tp_model.SEG_FREE_SPEED_FIELD, free_speed)
-        # This SetFeature() call is necessary to actually write the change
-        # back to the layer itself.
-        route_segments_lyr.SetFeature(route_segment)
-        # Memory mgt
-        route_segment.Destroy()    
-    route_segments_lyr.ResetReading()
+    print "In %s()." % inspect.stack()[0][3]
+    assign_speeds(route_segments_shp, mode_config, constant_speed_max, tp_model.SEG_FREE_SPEED_FIELD)
     return
 
+PEAK_RATIO = 0.5
+def ratio_max_speed(route_segment, mode_config):    
+    return mode_config['avespeed'] * PEAK_RATIO
+
 def assign_peak_speeds_portion_free_speed(route_segments_shp, mode_config):
-    PEAK_RATIO = 0.5
-    route_segments_lyr = route_segments_shp.GetLayer(0)
-    ensure_speed_field_exists(route_segments_lyr, tp_model.SEG_PEAK_SPEED_FIELD)
-    free_speed = mode_config['avespeed']
-    peak_speed = free_speed * PEAK_RATIO
-    for seg_num, route_segment in enumerate(route_segments_lyr):
-        route_segment.SetField(tp_model.SEG_PEAK_SPEED_FIELD, peak_speed)
-        # This SetFeature() call is necessary to actually write the change
-        # back to the layer itself.
-        route_segments_lyr.SetFeature(route_segment)
-        # Memory mgt
-        route_segment.Destroy()    
-    route_segments_lyr.ResetReading()
+    print "In %s()." % inspect.stack()[0][3]
+    assign_speeds(route_segments_shp, mode_config, ratio_max_speed,
+        tp_model.SEG_PEAK_SPEED_FIELD)
     return
 
 # Lat, long of Melbourne's origin in EPSG:4326 (WGS 84 on WGS 84 datum)
@@ -102,12 +92,14 @@ def peak_speed_func(Z_km):
         + 5.0/(Z_km/50.0+1)
     return peak_speed    
 
-def calc_peak_speed_melb_bus(route_segment):
+def calc_peak_speed_melb_bus(route_segment, mode_config):
     # We are going to reproject everything into a metre-based coord system
     #  to do the distance calculation.
     # Chose EPSG:28355 ("GDA94 / MGA zone 55") as an appropriate projected
     # Coordinate system, in meters, for the Melbourne region.
     #  (see http://spatialreference.org/ref/epsg/gda94-mga-zone-55/)
+    assert mode_config['system'] == 'Bus'
+
     target_srs = osr.SpatialReference()
     target_srs.ImportFromEPSG(28355)
 
@@ -138,24 +130,12 @@ def calc_peak_speed_melb_bus(route_segment):
     return V
 
 def assign_peak_speeds_bus_melb_distance_based(route_segments_shp, mode_config):
-    route_segments_lyr = route_segments_shp.GetLayer(0)
-    ensure_speed_field_exists(route_segments_lyr, tp_model.SEG_PEAK_SPEED_FIELD)
-    free_speed = mode_config['avespeed']
-    for seg_num, route_segment in enumerate(route_segments_lyr):
-        if seg_num % 100 == 0:
-            print "Assigning distance-based speed to segment number %d" % (seg_num)
-        peak_speed = calc_peak_speed_melb_bus(route_segment)
-        route_segment.SetField(tp_model.SEG_PEAK_SPEED_FIELD, peak_speed)
-        # This SetFeature() call is necessary to actually write the change
-        # back to the layer itself.
-        route_segments_lyr.SetFeature(route_segment)
-        # Memory mgt
-        route_segment.Destroy()    
-    route_segments_lyr.ResetReading()
+    print "In %s()." % inspect.stack()[0][3]
+    assign_speeds(route_segments_shp, mode_config, calc_peak_speed_melb_bus,
+        tp_model.SEG_PEAK_SPEED_FIELD)
     return
 
 if __name__ == "__main__":
-
     parser = OptionParser()
     parser.add_option('--segments', dest='inputsegments', help='Shapefile of line segments.')
     parser.add_option('--service', dest='service', help="Should be 'train', 'tram' or 'bus'.")
