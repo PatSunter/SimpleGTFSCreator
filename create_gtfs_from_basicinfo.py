@@ -81,6 +81,40 @@ DEFAULT_SERVICE_INFO = [
     ("sat", default_service_headways),
     ("sun", default_service_headways) ]
 
+# Aim of this one is when using peak and off-peak speeds to represent network
+# congestion, smooth out the peak-offpeak and vice-versa transitions, to avoid
+# large spreading/bunching that can result from this.
+ramped_service_headways = [
+    (time(04,30), time(06,00), 20, False),
+    (time(05,30), time(06,00), 10, False),
+    (time(06,00), time(06,30), 7.5, False),
+    (time(06,30), time(07,00), 5, False),
+    (time(07,00), time(07,15), 4, False), # Special 'pre-peak injection'
+    (time(07,15), time(07,30), 3, False), # Special 'pre-peak injection'
+    (time(07,30), time(8,00), 5, True), 
+    (time(8,00), time(8,40), 5, True), 
+    (time(8,40), time(9,30), 7.5, True), 
+    (time(9,30), time(10,00), 10, True), 
+    (time(10,00), time(10,30), 10, False),
+    (time(10,30), time(14,30), 10, False),
+    (time(14,30), time(15,00), 7.5, False),
+    (time(15,00), time(15,30), 5, False),
+    (time(15,30), time(15,45), 4, False),# Special 'pre-peak injection'
+    (time(15,45), time(16,00), 3, False),# Special 'pre-peak injection'
+    (time(16,00), time(16,30), 5, True),
+    (time(16,30), time(17,30), 5, True),
+    (time(17,30), time(18,05), 6.5, True),
+    (time(18,05), time(18,30), 7.5, True),
+    (time(18,30), time(19,00), 7.5, False),
+    (time(19,00), time(23,00), 10, False),
+    (time(23,00), time(02,00), 20, False)
+    ]
+
+RAMPED_SERVICE_INFO = [
+    ("monfri", ramped_service_headways),
+    ("sat", ramped_service_headways),
+    ("sun", ramped_service_headways) ]
+
 settings = {
     'train': {
         'name': 'Metro Trains - Upgraded',
@@ -108,7 +142,7 @@ settings = {
         'url': 'http://www.bze.org.au',
         'system': 'Bus',
         'avespeed': 30,
-        'services_info': DEFAULT_SERVICE_INFO,
+        'services_info': RAMPED_SERVICE_INFO,
         'id': 34,
         'index': 3400000,
     }
