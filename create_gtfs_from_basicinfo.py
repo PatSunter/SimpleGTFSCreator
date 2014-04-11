@@ -10,156 +10,18 @@ import inspect
 import copy
 from datetime import datetime, date, time, timedelta
 from optparse import OptionParser
+import sys
+
 import pyproj
 import osgeo.ogr
 from osgeo import ogr
-import sys
-
 import transitfeed
+
+import mode_timetable_info as m_t_info
+import topology_shapefile_data_model as tp_model
 
 # Will determine how much infor is printed.
 VERBOSE = False
-
-# These determine fields within the GIS
-SEG_PEAK_SPEED_FIELD = "peak_speed"
-SEG_FREE_SPEED_FIELD = "free_speed"
-# For Pat's test:- these are "Stop1N", "Stop2N"
-SEG_STOP_1_NAME_FIELD = "pt_a"
-SEG_STOP_2_NAME_FIELD = "pt_b"
-#SEG_ROUTE_DIST_FIELD = 'route_dist'
-#ROUTE_DIST_RATIO_TO_KM = 1
-SEG_ROUTE_DIST_FIELD = 'leg_length'
-ROUTE_DIST_RATIO_TO_KM = 1000
-# For Pat's test:- these are "Name"
-STOP_NAME_FIELD = "ID"
-
-# These are plain strings, as required by the transitfeed library
-START_DATE_STR = '20130101'
-END_DATE_STR = '20141231'
-
-#Format:
-# avespeed: average speed (km/h)
-# headway: how often each hour a vehicle arrives
-# first service: the first service of the day
-# last service: the last service of the day. (Ideally should be able to do
-#  after midnight ... obviously should be lower than first service though).
-# id: Needed for GTFS - a unique ID (important if going to work with multiple
-# agencies in a combined larger GTFS file or multiple files.
-# index: Similar to ID, but will be used to add route numbers to this index
-#  to generate a unique number for each route.
-
-# For speeds - see HiTrans guide, page 127
-
-#Service periods is a list of tuples:-
-# Where each is a start time, end time, and then a headway during that period.
-
-sparse_test_headways = [
-    (time(05,00), time(02,00), 60),
-    ]
-
-SPARSE_SERVICE_INFO = [
-    ("monfri", sparse_test_headways)
-    ]
-
-# Format of columns:-
-# 0: start time of period
-# 1: end time of period
-# 2: headway during period (time between services)
-# 3: Is this a peak period? True/False (used to decide speed in congested
-# areas).
-default_service_headways = [
-    (time(05,00), time(07,30), 20, False),
-    (time(07,30), time(10,00), 5, True), 
-    (time(10,00), time(16,00), 10, False),
-    (time(16,00), time(18,30), 5, True),
-    (time(18,30), time(23,00), 10, False),
-    (time(23,00), time(02,00), 20, False)
-    ]
-
-DEFAULT_SERVICE_INFO = [
-    ("monfri", default_service_headways),
-    ("sat", default_service_headways),
-    ("sun", default_service_headways) ]
-
-# Aim of this one is when using peak and off-peak speeds to represent network
-# congestion, smooth out the peak-offpeak and vice-versa transitions, to avoid
-# large spreading/bunching that can result from this.
-ramped_service_headways = [
-    (time(04,30), time(06,00), 20, False),
-    (time(05,30), time(06,00), 10, False),
-    (time(06,00), time(06,30), 7.5, False),
-    (time(06,30), time(07,00), 5, False),
-    (time(07,00), time(07,15), 4, False), # Special 'pre-peak injection'
-    (time(07,15), time(07,30), 3, False), # Special 'pre-peak injection'
-    (time(07,30), time(8,00), 5, True), 
-    (time(8,00), time(8,40), 5, True), 
-    (time(8,40), time(9,30), 7.5, True), 
-    (time(9,30), time(10,00), 10, True), 
-    (time(10,00), time(10,30), 10, False),
-    (time(10,30), time(14,30), 10, False),
-    (time(14,30), time(15,00), 7.5, False),
-    (time(15,00), time(15,30), 5, False),
-    (time(15,30), time(15,45), 4, False),# Special 'pre-peak injection'
-    (time(15,45), time(16,00), 3, False),# Special 'pre-peak injection'
-    (time(16,00), time(16,30), 5, True),
-    (time(16,30), time(17,30), 5, True),
-    (time(17,30), time(18,05), 6.5, True),
-    (time(18,05), time(18,30), 7.5, True),
-    (time(18,30), time(19,00), 7.5, False),
-    (time(19,00), time(23,00), 10, False),
-    (time(23,00), time(02,00), 20, False)
-    ]
-
-RAMPED_SERVICE_INFO = [
-    ("monfri", ramped_service_headways),
-    ("sat", ramped_service_headways),
-    ("sun", ramped_service_headways) ]
-
-settings = {
-    'train': {
-        'name': 'Metro Trains - Upgraded',
-        'loc': 'Australia/Melbourne',
-        'url': 'http://www.bze.org.au',
-        'system': 'Subway',
-        'avespeed': 65,
-        'services_info': DEFAULT_SERVICE_INFO,
-        'id': 30,
-        'index': 3000000,
-    },
-    'tram': {
-        'name': 'Yarra Trams - Upgraded',
-        'loc': 'Australia/Melbourne',
-        'url': 'http://www.bze.org.au',
-        'system': 'Tram',
-        'avespeed': 35,
-        'services_info': DEFAULT_SERVICE_INFO,
-        'id': 32,
-        'index': 3200000,
-    },
-    'bus': {
-        'name': 'Melbourne Bus - Upgraded',
-        'loc': 'Australia/Melbourne',
-        'url': 'http://www.bze.org.au',
-        'system': 'Bus',
-        'avespeed': 30,
-        'services_info': RAMPED_SERVICE_INFO,
-        'id': 34,
-        'index': 3400000,
-    }
-}
-
-def calc_total_service_time_elapsed(serv_headways, curr_time):
-    first_period_start_time = serv_headways[0][0]
-    tdiff = datetime.combine(date.today(), curr_time) \
-        - datetime.combine(date.today(), first_period_start_time)
-    if tdiff < timedelta(0):
-        tdiff += timedelta(days=1)
-    return tdiff
-
-def calc_service_time_elapsed_end_period(serv_headways, period_num):
-    tdiff = calc_total_service_time_elapsed(serv_headways,
-        serv_headways[period_num][1])
-    return tdiff
 
 class Seq_Stop_Info:
     """A small struct to store key info about a stop in the sequence of a
@@ -174,13 +36,13 @@ class Seq_Stop_Info:
 def get_distance_km(segment):
     # In H's script, this will be saved as an attribute in the generation
     # phase.
-    rdist = float(segment.GetField(SEG_ROUTE_DIST_FIELD))
-    rdist = rdist / ROUTE_DIST_RATIO_TO_KM
+    rdist = float(segment.GetField(tp_model.SEG_ROUTE_DIST_FIELD))
+    rdist = rdist / tp_model.ROUTE_DIST_RATIO_TO_KM
     return rdist
 
 def save_seq_stop_speed_info(seq_stop_info, next_segment, stops_lyr):
-    seq_stop_info.peak_speed_next = next_segment.GetField(SEG_PEAK_SPEED_FIELD)
-    seq_stop_info.free_speed_next = next_segment.GetField(SEG_FREE_SPEED_FIELD)
+    seq_stop_info.peak_speed_next = next_segment.GetField(tp_model.SEG_PEAK_SPEED_FIELD)
+    seq_stop_info.free_speed_next = next_segment.GetField(tp_model.SEG_FREE_SPEED_FIELD)
     seq_stop_info.dist_km_to_next = get_distance_km(next_segment)
     return
 
@@ -264,8 +126,8 @@ def create_gtfs_stop_entries(stops_shapefile, mode_config, schedule):
 
 def add_service_period(days_week_str, schedule):    
     service_period = transitfeed.ServicePeriod(id=days_week_str)
-    service_period.SetStartDate(START_DATE_STR)
-    service_period.SetEndDate(END_DATE_STR)
+    service_period.SetStartDate(m_t_info.START_DATE_STR)
+    service_period.SetEndDate(m_t_info.END_DATE_STR)
     # Set the day of week times
     if days_week_str == 'monthur':
         service_period.SetDayOfWeekHasService(0)
@@ -403,7 +265,7 @@ def get_gtfs_stop_byname(stop_name, schedule):
 
 def get_stop_feature_name(feature):
     # fname = feature.GetField('Name') 
-    stop_id = feature.GetField(STOP_NAME_FIELD)
+    stop_id = feature.GetField(tp_model.STOP_NAME_FIELD)
     if stop_id is None:
         stop_name = None
     else:
@@ -435,9 +297,9 @@ def get_route_segment(segment_id, route_segments_lyr):
     return match_feature
 
 def get_other_stop_name(segment, stop_name):
-    stop_name_a = segment.GetField(SEG_STOP_1_NAME_FIELD)
+    stop_name_a = segment.GetField(tp_model.SEG_STOP_1_NAME_FIELD)
     if stop_name == stop_name_a:
-        return segment.GetField(SEG_STOP_2_NAME_FIELD)
+        return segment.GetField(tp_model.SEG_STOP_2_NAME_FIELD)
     else:
         return stop_name_a
 
@@ -445,10 +307,10 @@ def get_stop_order(segment, next_seg):
     """Use the fact that for two segments, in the first segment, there must be
     a matching stop with the 2nd segment. Return the IDs of the 1st and 2nd stops in the
     first segment."""
-    seg_stop_name_a = segment.GetField(SEG_STOP_1_NAME_FIELD)
-    seg_stop_name_b = segment.GetField(SEG_STOP_2_NAME_FIELD)
-    next_seg_stop_name_a = next_seg.GetField(SEG_STOP_1_NAME_FIELD)
-    next_seg_stop_name_b = next_seg.GetField(SEG_STOP_2_NAME_FIELD)
+    seg_stop_name_a = segment.GetField(tp_model.SEG_STOP_1_NAME_FIELD)
+    seg_stop_name_b = segment.GetField(tp_model.SEG_STOP_2_NAME_FIELD)
+    next_seg_stop_name_a = next_seg.GetField(tp_model.SEG_STOP_1_NAME_FIELD)
+    next_seg_stop_name_b = next_seg.GetField(tp_model.SEG_STOP_2_NAME_FIELD)
     # Find the linking stop ... the non-linking stop is then the first one.
     if seg_stop_name_a == next_seg_stop_name_a:
         first_stop_name, second_stop_name = seg_stop_name_b, seg_stop_name_a
@@ -459,8 +321,8 @@ def get_stop_order(segment, next_seg):
     elif seg_stop_name_b == next_seg_stop_name_b:    
         first_stop_name, second_stop_name = seg_stop_name_a, seg_stop_name_b
     else:
-        s_name = segment.GetField(STOP_NAME_FIELD)
-        next_name = next_seg.GetField(STOP_NAME_FIELD) 
+        s_name = segment.GetField(tp_model.STOP_NAME_FIELD)
+        next_name = next_seg.GetField(tp_model.STOP_NAME_FIELD) 
         print "Error, in segment '%s', next seg is '%s', "\
             "stop a is '%s', stop b is '%s', "\
             "next seg stop a is '%s', stop b is '%s', "\
@@ -502,11 +364,11 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
             # special case for a route with only one segment.
             if len(segments) == 1:
                 if dir_id == 0:
-                    first_stop_name = segment.GetField(SEG_STOP_1_NAME_FIELD)
-                    second_stop_name = segment.GetField(SEG_STOP_2_NAME_FIELD)
+                    first_stop_name = segment.GetField(tp_model.SEG_STOP_1_NAME_FIELD)
+                    second_stop_name = segment.GetField(tp_model.SEG_STOP_2_NAME_FIELD)
                 else:    
-                    first_stop_name = segment.GetField(SEG_STOP_2_NAME_FIELD)
-                    second_stop_name = segment.GetField(SEG_STOP_1_NAME_FIELD)
+                    first_stop_name = segment.GetField(tp_model.SEG_STOP_2_NAME_FIELD)
+                    second_stop_name = segment.GetField(tp_model.SEG_STOP_1_NAME_FIELD)
             else:        
                 next_seg_id = segments[seg_ctr+1]
                 next_seg = get_route_segment(next_seg_id, route_segments_lyr)
@@ -567,8 +429,8 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time,
     period_at_stop = trip_start_period
     peak_status = serv_headways[period_at_stop][3]
     time_at_stop = trip_start_time
-    end_elapsed_curr_period = calc_service_time_elapsed_end_period(serv_headways,
-        period_at_stop)
+    end_elapsed_curr_p = m_t_info.calc_service_time_elapsed_end_period(
+        serv_headways, period_at_stop)
     n_stops_on_route = len(prebuilt_stop_info_list)
 
     for stop_seq, s_info in enumerate(prebuilt_stop_info_list):
@@ -603,17 +465,19 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time,
         # (midnite), they will may still be on the road/rails after the
         # nominal end time of the period. In this case, just keep going
         # in same conditions of current period.
-        serv_elapsed = calc_total_service_time_elapsed(serv_headways, time_at_stop)
+        serv_elapsed = m_t_info.calc_total_service_time_elapsed(
+            serv_headways, time_at_stop)
         if (period_at_stop+1 < len(serv_headways)) \
-                and serv_elapsed >= end_elapsed_curr_period:
+                and serv_elapsed >= end_elapsed_curr_p:
             period_at_stop += 1
             peak_status = serv_headways[period_at_stop][3]
-            end_elapsed_curr_period = calc_service_time_elapsed_end_period(serv_headways,
-                period_at_stop)
+            end_elapsed_curr_p = m_t_info.calc_service_time_elapsed_end_period(
+                serv_headways, period_at_stop)
             
         # Only have to do time inc. calculations if more stops remaining.
         if (stop_seq+1) < n_stops_on_route:
-            time_inc = calc_time_on_next_segment(s_info, mode_config, use_seg_speeds, peak_status)
+            time_inc = calc_time_on_next_segment(s_info, mode_config,
+                use_seg_speeds, peak_status)
             cumulative_time_on_trip += time_inc
     return
 
@@ -652,7 +516,8 @@ if __name__ == "__main__":
     parser.add_option('--segments', dest='inputsegments', help='Shapefile of line segments.')
     parser.add_option('--stops', dest='inputstops', help='Shapefile of stops.')
     parser.add_option('--service', dest='service', help="Should be 'train', 'tram' or 'bus'.")
-    parser.add_option('--output', dest='output', help='Path of output file. Should end in .zip')
+    parser.add_option('--output', dest='output', help='Path of output file. '\
+        'Should end in .zip')
     parser.add_option('--usesegspeeds', dest='usesegspeeds', 
         help='Use per-segment speeds defined in route segments shapefile? '\
         'If false, then will just use a constant speed defined per mode.')
@@ -674,7 +539,7 @@ if __name__ == "__main__":
 
     use_seg_speeds = str2bool(options.usesegspeeds)
 
-    mode_config = settings[options.service]
+    mode_config = m_t_info.settings[options.service]
 
     process_data(options.routedefs, options.inputsegments, options.inputstops,
         mode_config, options.output, use_seg_speeds)

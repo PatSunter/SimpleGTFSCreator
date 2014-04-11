@@ -9,8 +9,8 @@ from optparse import OptionParser
 import osgeo.ogr
 from osgeo import ogr, osr
 
-from create_gtfs_from_basicinfo import settings, SEG_FREE_SPEED_FIELD, \
-    SEG_PEAK_SPEED_FIELD
+import mode_timetable_info as m_t_info
+import topology_shapefile_data_model as tp_model
 
 def ensure_speed_field_exists(route_segments_lyr, speed_field_name):
     speed_field_exists = False
@@ -41,12 +41,29 @@ def ensure_speed_field_exists(route_segments_lyr, speed_field_name):
         f_defn.SetPrecision(15)
         route_segments_lyr.CreateField(f_defn)  
 
-def assign_free_speeds(route_segments_shp, mode_config):
+def assign_speeds(route_segments_shp, mode_config, speed_func, speed_field_name):
     route_segments_lyr = route_segments_shp.GetLayer(0)
-    ensure_speed_field_exists(route_segments_lyr, SEG_FREE_SPEED_FIELD)
+    ensure_speed_field_exists(route_segments_lyr, speed_field_name)
+    for seg_num, route_segment in enumerate(route_segments_lyr):
+        if seg_num % 100 == 0:
+            print "Assigning distance-based speed to segment number %d" % (seg_num)
+        speed = speed_func(route_segment, mode_config)
+        route_segment.SetField(speed_field_name, speed)
+        # This SetFeature() call is necessary to actually write the change
+        # back to the layer itself.
+        route_segments_lyr.SetFeature(route_segment)
+        # Memory mgt
+        route_segment.Destroy()    
+    route_segments_lyr.ResetReading()
+    return
+
+
+def assign_free_speeds_constant(route_segments_shp, mode_config):
+    route_segments_lyr = route_segments_shp.GetLayer(0)
+    ensure_speed_field_exists(route_segments_lyr, tp_model.SEG_FREE_SPEED_FIELD)
     free_speed = mode_config['avespeed']
     for seg_num, route_segment in enumerate(route_segments_lyr):
-        route_segment.SetField(SEG_FREE_SPEED_FIELD, free_speed)
+        route_segment.SetField(tp_model.SEG_FREE_SPEED_FIELD, free_speed)
         # This SetFeature() call is necessary to actually write the change
         # back to the layer itself.
         route_segments_lyr.SetFeature(route_segment)
@@ -58,11 +75,11 @@ def assign_free_speeds(route_segments_shp, mode_config):
 def assign_peak_speeds_portion_free_speed(route_segments_shp, mode_config):
     PEAK_RATIO = 0.5
     route_segments_lyr = route_segments_shp.GetLayer(0)
-    ensure_speed_field_exists(route_segments_lyr, SEG_PEAK_SPEED_FIELD)
+    ensure_speed_field_exists(route_segments_lyr, tp_model.SEG_PEAK_SPEED_FIELD)
     free_speed = mode_config['avespeed']
     peak_speed = free_speed * PEAK_RATIO
     for seg_num, route_segment in enumerate(route_segments_lyr):
-        route_segment.SetField(SEG_PEAK_SPEED_FIELD, peak_speed)
+        route_segment.SetField(tp_model.SEG_PEAK_SPEED_FIELD, peak_speed)
         # This SetFeature() call is necessary to actually write the change
         # back to the layer itself.
         route_segments_lyr.SetFeature(route_segment)
@@ -79,9 +96,13 @@ def assign_peak_speeds_portion_free_speed(route_segments_shp, mode_config):
 # As calculated by converting allnodes.csv[0] from EPSG:28355 to EPSG:4326
 ORIGIN_LAT_LON = (-37.81081208860423, 144.969328103266179)
 
-def calc_peak_speed_melb_bus(route_segment):
+def peak_speed_func(Z_km):
     """Formula used as provided by Laurent Allieres, 7 Nov 2013."""
+    peak_speed = (230 + 15 * Z_km - 0.13 * Z_km**2) * 60/1000.0 * (2/3.0) \
+        + 5.0/(Z_km/50.0+1)
+    return peak_speed    
 
+def calc_peak_speed_melb_bus(route_segment):
     # We are going to reproject everything into a metre-based coord system
     #  to do the distance calculation.
     # Chose EPSG:28355 ("GDA94 / MGA zone 55") as an appropriate projected
@@ -113,20 +134,18 @@ def calc_peak_speed_melb_bus(route_segment):
     
     Z = origin.Distance(seg_midpoint)
     Z_km = Z / 1000.0
-
-    peak_speed = (230 + 15 * Z_km - 0.13 * Z_km**2) * 60/1000.0 * (2/3.0) \
-        + 5.0/(Z_km/50.0+1)
-    return peak_speed
+    V = peak_speed_func(Z_km)
+    return V
 
 def assign_peak_speeds_bus_melb_distance_based(route_segments_shp, mode_config):
     route_segments_lyr = route_segments_shp.GetLayer(0)
-    ensure_speed_field_exists(route_segments_lyr, SEG_PEAK_SPEED_FIELD)
+    ensure_speed_field_exists(route_segments_lyr, tp_model.SEG_PEAK_SPEED_FIELD)
     free_speed = mode_config['avespeed']
     for seg_num, route_segment in enumerate(route_segments_lyr):
         if seg_num % 100 == 0:
             print "Assigning distance-based speed to segment number %d" % (seg_num)
         peak_speed = calc_peak_speed_melb_bus(route_segment)
-        route_segment.SetField(SEG_PEAK_SPEED_FIELD, peak_speed)
+        route_segment.SetField(tp_model.SEG_PEAK_SPEED_FIELD, peak_speed)
         # This SetFeature() call is necessary to actually write the change
         # back to the layer itself.
         route_segments_lyr.SetFeature(route_segment)
@@ -148,13 +167,13 @@ if __name__ == "__main__":
     if options.service is None:
         parser.print_help()
         parser.error("No service option requested. Should be one of %s" \
-            % (settings.keys()))
-    if options.service not in settings:
+            % (m_t_info.settings.keys()))
+    if options.service not in m_t_info.settings:
         parser.print_help()
         parser.error("Service option requested '%s' not in allowed set, of %s" \
-            % (options.service, settings.keys()))
+            % (options.service, m_t_info.settings.keys()))
         
-    mode_config = settings[options.service]
+    mode_config = m_t_info.settings[options.service]
 
     # Open in write-able mode, hence the 1 below.
     fname = os.path.expanduser(options.inputsegments)
@@ -163,7 +182,7 @@ if __name__ == "__main__":
         print "Error, route segments shape file given, %s , failed to open." \
             % (options.inputsegments)
         sys.exit(1)    
-    assign_free_speeds(route_segments_shp, mode_config)
+    assign_free_speeds_constant(route_segments_shp, mode_config)
     #assign_peak_speeds_portion_free_speed(route_segments_shp, mode_config)
     assign_peak_speeds_bus_melb_distance_based(route_segments_shp, mode_config)
     # Close the shape files - includes making sure it writes
