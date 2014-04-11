@@ -1,12 +1,13 @@
 #!/usr/bin/env python2
 
 import os
+import os.path
 import re
 import sys
 from optparse import OptionParser
 
 import osgeo.ogr
-from osgeo import ogr
+from osgeo import ogr, osr
 
 from create_gtfs_from_basicinfo import settings, SEG_FREE_SPEED_FIELD, \
     SEG_PEAK_SPEED_FIELD
@@ -70,9 +71,68 @@ def assign_peak_speeds_portion_free_speed(route_segments_shp, mode_config):
     route_segments_lyr.ResetReading()
     return
 
-def assign_peak_speeds_bus_la_distance_based(route_segments_shp, mode_config):
-    print "Error: Not written yet!!!"
-    sys.exit(1)
+# Lat, long of Melbourne's origin in EPSG:4326 (WGS 84 on WGS 84 datum)
+# Cnr of Bourke & Swanston
+#ORIGIN_LAT_LON = (-37.81348, 144.96558) 
+# As provided by Laurent in function - works out at N-E corner of CBD grid
+#ORIGIN_LAT_LON = (-37.809176, 144.970653)
+# As calculated by converting allnodes.csv[0] from EPSG:28355 to EPSG:4326
+ORIGIN_LAT_LON = (-37.81081208860423, 144.969328103266179)
+
+def calc_peak_speed_melb_bus(route_segment):
+    """Formula used as provided by Laurent Allieres, 7 Nov 2013."""
+
+    # We are going to reproject everything into a metre-based coord system
+    #  to do the distance calculation.
+    # Chose EPSG:28355 ("GDA94 / MGA zone 55") as an appropriate projected
+    # Coordinate system, in meters, for the Melbourne region.
+    #  (see http://spatialreference.org/ref/epsg/gda94-mga-zone-55/)
+    target_srs = osr.SpatialReference()
+    target_srs.ImportFromEPSG(28355)
+
+    seg_geom = route_segment.GetGeometryRef()
+    segment_srs = seg_geom.GetSpatialReference()
+    # Get the midpoint, as we'll consider this the point to use as 'distance'
+    # from CBD
+    if seg_geom.GetPoint(0) == seg_geom.GetPoint(1):
+        # A special case for segments of zero length. Shouldn't really exist,
+        # but have been produced in some cases.
+        seg_midpoint = ogr.Geometry(ogr.wkbPoint)
+        seg_midpoint.AddPoint(*seg_geom.GetPoint(0))
+    else:
+        seg_midpoint = seg_geom.Centroid()
+    transform_seg = osr.CoordinateTransformation(segment_srs, target_srs)
+    seg_midpoint.Transform(transform_seg)
+
+    origin = ogr.Geometry(ogr.wkbPoint)
+    origin.AddPoint(ORIGIN_LAT_LON[1], ORIGIN_LAT_LON[0]) # Func takes lon,lat
+    origin_srs = osr.SpatialReference()
+    origin_srs.ImportFromEPSG(4326)
+    transform_origin = osr.CoordinateTransformation(origin_srs, target_srs)
+    origin.Transform(transform_origin)
+    
+    Z = origin.Distance(seg_midpoint)
+    Z_km = Z / 1000.0
+
+    peak_speed = (230 + 15 * Z_km - 0.13 * Z_km**2) * 60/1000.0 * (2/3.0) \
+        + 5.0/(Z_km/50.0+1)
+    return peak_speed
+
+def assign_peak_speeds_bus_melb_distance_based(route_segments_shp, mode_config):
+    route_segments_lyr = route_segments_shp.GetLayer(0)
+    ensure_speed_field_exists(route_segments_lyr, SEG_PEAK_SPEED_FIELD)
+    free_speed = mode_config['avespeed']
+    for seg_num, route_segment in enumerate(route_segments_lyr):
+        if seg_num % 100 == 0:
+            print "Assigning distance-based speed to segment number %d" % (seg_num)
+        peak_speed = calc_peak_speed_melb_bus(route_segment)
+        route_segment.SetField(SEG_PEAK_SPEED_FIELD, peak_speed)
+        # This SetFeature() call is necessary to actually write the change
+        # back to the layer itself.
+        route_segments_lyr.SetFeature(route_segment)
+        # Memory mgt
+        route_segment.Destroy()    
+    route_segments_lyr.ResetReading()
     return
 
 if __name__ == "__main__":
@@ -97,9 +157,15 @@ if __name__ == "__main__":
     mode_config = settings[options.service]
 
     # Open in write-able mode, hence the 1 below.
-    route_segments_shp = osgeo.ogr.Open(options.inputsegments, 1)    
+    fname = os.path.expanduser(options.inputsegments)
+    route_segments_shp = osgeo.ogr.Open(fname, 1)    
+    if route_segments_shp is None:
+        print "Error, route segments shape file given, %s , failed to open." \
+            % (options.inputsegments)
+        sys.exit(1)    
     assign_free_speeds(route_segments_shp, mode_config)
-    assign_peak_speeds_portion_free_speed(route_segments_shp, mode_config)
+    #assign_peak_speeds_portion_free_speed(route_segments_shp, mode_config)
+    assign_peak_speeds_bus_melb_distance_based(route_segments_shp, mode_config)
     # Close the shape files - includes making sure it writes
     route_segments_shp.Destroy()
     route_segments_shp = None
