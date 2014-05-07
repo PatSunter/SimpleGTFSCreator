@@ -78,6 +78,11 @@ RAMPED_SERVICE_INFO = [
     ("sat", ramped_service_headways),
     ("sun", ramped_service_headways) ]
 
+# PDS: stop_prefix introduced 2014-05-07: to reflect Netview-based
+#  convention to use a different prefix before different types of 
+#  stops in relating trip segments to stop IDs.
+# N.B. :- the 'system' entry is specific to GTFS logic, so generally
+#  should be 'Subway', 'Tram', or 'Bus' - can't just make up any name.
 settings = {
     'train': {
         'name': 'Metro Trains - Upgraded',
@@ -88,6 +93,7 @@ settings = {
         'services_info': DEFAULT_SERVICE_INFO,
         'id': 30,
         'index': 3000000,
+        'stop_prefix': 'TR',
     },
     'tram': {
         'name': 'Yarra Trams - Upgraded',
@@ -98,6 +104,7 @@ settings = {
         'services_info': DEFAULT_SERVICE_INFO,
         'id': 32,
         'index': 3200000,
+        'stop_prefix': 'TM',
     },
     'bus': {
         'name': 'Melbourne Bus - Upgraded',
@@ -108,7 +115,19 @@ settings = {
         'services_info': RAMPED_SERVICE_INFO,
         'id': 34,
         'index': 3400000,
-    }
+        'stop_prefix': 'B',
+    },
+    'bus-motorway': {
+        'name': 'Melbourne Bus - Motorways',
+        'loc': 'Australia/Melbourne',
+        'url': 'http://www.bze.org.au',
+        'system': 'Bus',
+        'avespeed': 50,
+        'services_info': RAMPED_SERVICE_INFO,
+        'id': 36,
+        'index': 3600000,
+        'stop_prefix': 'N',
+    },    
 }
 
 # These are plain strings, as required by the transitfeed library
