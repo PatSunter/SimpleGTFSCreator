@@ -40,9 +40,29 @@ def get_distance_km(segment):
     rdist = rdist / tp_model.ROUTE_DIST_RATIO_TO_KM
     return rdist
 
-def save_seq_stop_speed_info(seq_stop_info, next_segment, stops_lyr):
-    seq_stop_info.peak_speed_next = next_segment.GetField(tp_model.SEG_PEAK_SPEED_FIELD)
-    seq_stop_info.free_speed_next = next_segment.GetField(tp_model.SEG_FREE_SPEED_FIELD)
+def save_seq_stop_speed_info(seq_stop_info, next_segment, stops_lyr, use_seg_speeds):
+    try:
+        seq_stop_info.peak_speed_next = next_segment.GetField(tp_model.SEG_PEAK_SPEED_FIELD)
+    except ValueError:
+        if use_seg_speeds == True:
+            print "ERROR: you asked to use per-segment speeds when calculating "\
+                "timetable, but given segments shapefile is missing field '%s'"\
+                % (tp_model.SEG_PEAK_SPEED_FIELD)
+            sys.exit(1)
+        else:
+            # Ok to continue in this case.
+            pass
+    try:
+        seq_stop_info.free_speed_next = next_segment.GetField(tp_model.SEG_FREE_SPEED_FIELD)
+    except ValueError:
+        if use_seg_speeds == True:
+            print "ERROR: you asked to use per-segment speeds when calculating "\
+                "timetable, but given segments shapefile is missing field '%s'"\
+                % (tp_model.SEG_FREE_SPEED_FIELD)
+            sys.exit(1)
+        else:
+            # Ok to continue in this case.
+            pass
     seq_stop_info.dist_km_to_next = get_distance_km(next_segment)
     return
 
@@ -92,6 +112,7 @@ def create_gtfs_stop_entries(stops_shapefile, mode_config, schedule):
 
     print "%s() called." % inspect.stack()[0][3]
     layer = stops_shapefile.GetLayer(0)
+    stop_prefix = mode_config['stop_prefix']
     for stop_cnt, stop_feature in enumerate(layer):
         
         #stop_name = stop_feature.GetField('Name')
@@ -99,7 +120,7 @@ def create_gtfs_stop_entries(stops_shapefile, mode_config, schedule):
         stop_id = stop_feature.GetField('ID')
         if stop_id is None:
             continue
-        stop_name = "B"+str(int(stop_id))
+        stop_name = stop_prefix + str(int(stop_id))
         stop_desc = None
         stop_code = None
         stop_id_gtfs = str(mode_config['index'] + stop_cnt)
@@ -178,7 +199,7 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
             # This way we do this just once per route and direction.
             prebuilt_stop_info_list = build_stop_list_and_seg_info_along_route(
                 route_def, dir_id, route_segments_shp, stops_shp,
-                mode_config, schedule)
+                mode_config, schedule, use_seg_speeds)
             
             # N.B.: Possible we might want to convert
             # the services_info of headway periods to a configurable per-route later 
@@ -333,7 +354,7 @@ def get_stop_order(segment, next_seg):
     return first_stop_name, second_stop_name
 
 def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_shp,
-        stops_shp, mode_config, schedule):
+        stops_shp, mode_config, schedule, use_seg_speeds):
 
     prebuilt_stop_info_list = []
     route_segments_lyr = route_segments_shp.GetLayer(0)
@@ -384,7 +405,7 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
         s_info = Seq_Stop_Info(first_stop)
         # We are still going to save key info now, to save accessing the
         # shapefile layers again unnecessarily later.
-        save_seq_stop_speed_info(s_info, segment, stops_lyr)
+        save_seq_stop_speed_info(s_info, segment, stops_lyr, use_seg_speeds)
         prebuilt_stop_info_list.append(s_info)
         stop_seq += 1
         # Save this to help with calculations in subsequent steps
