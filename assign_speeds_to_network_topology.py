@@ -16,10 +16,12 @@ import topology_shapefile_data_model as tp_model
 def ensure_speed_field_exists(route_segments_lyr, speed_field_name):
     speed_field_exists = False
     lyr_defn = route_segments_lyr.GetLayerDefn()
+    field_match = False
     for field_i in range(lyr_defn.GetFieldCount()):
         if lyr_defn.GetFieldDefn(field_i).GetName() == speed_field_name:
+            field_match = True
             break;
-    if field_i < lyr_defn.GetFieldCount():
+    if field_match == True:
         f_defn = lyr_defn.GetFieldDefn(field_i)
         # Check type etc is correct
         f_type_code = f_defn.GetType()
@@ -47,7 +49,7 @@ def assign_speeds(route_segments_shp, mode_config, speed_func, speed_field_name)
     ensure_speed_field_exists(route_segments_lyr, speed_field_name)
     for seg_num, route_segment in enumerate(route_segments_lyr):
         if seg_num % 100 == 0:
-            print "Assigning speed to segment number %d" % (seg_num)
+            print "Assigning speed to segment number %d ..." % (seg_num)
         speed = speed_func(route_segment, mode_config)
         route_segment.SetField(speed_field_name, speed)
         # This SetFeature() call is necessary to actually write the change
@@ -55,6 +57,7 @@ def assign_speeds(route_segments_shp, mode_config, speed_func, speed_field_name)
         route_segments_lyr.SetFeature(route_segment)
         # Memory mgt
         route_segment.Destroy()    
+    print "...finished assigning speeds to segments."    
     route_segments_lyr.ResetReading()
     return
 
@@ -63,9 +66,21 @@ def constant_speed_max(route_segment, mode_config):
     """Just return constant average speed defined for this mode."""
     return mode_config['avespeed']
 
+def constant_speed_max_peak(route_segment, mode_config):
+    """Just return constant average speed defined for this mode, peak hours"""
+    return mode_config['avespeed-peak']
+
+
 def assign_free_speeds_constant(route_segments_shp, mode_config):
     print "In %s()." % inspect.stack()[0][3]
-    assign_speeds(route_segments_shp, mode_config, constant_speed_max, tp_model.SEG_FREE_SPEED_FIELD)
+    assign_speeds(route_segments_shp, mode_config, constant_speed_max,
+        tp_model.SEG_FREE_SPEED_FIELD)
+    return
+
+def assign_peak_speeds_constant(route_segments_shp, mode_config):
+    print "In %s()." % inspect.stack()[0][3]
+    assign_speeds(route_segments_shp, mode_config, constant_speed_max_peak,
+        tp_model.SEG_PEAK_SPEED_FIELD)
     return
 
 PEAK_RATIO = 0.5
@@ -164,7 +179,8 @@ if __name__ == "__main__":
         sys.exit(1)    
     assign_free_speeds_constant(route_segments_shp, mode_config)
     #assign_peak_speeds_portion_free_speed(route_segments_shp, mode_config)
-    assign_peak_speeds_bus_melb_distance_based(route_segments_shp, mode_config)
+    #assign_peak_speeds_bus_melb_distance_based(route_segments_shp, mode_config)
+    assign_peak_speeds_constant(route_segments_shp, mode_config)
     # Close the shape files - includes making sure it writes
     route_segments_shp.Destroy()
     route_segments_shp = None
