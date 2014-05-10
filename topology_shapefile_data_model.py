@@ -1,8 +1,10 @@
 
 """These global variables determine fields within the GIS Network Topology shapefile"""
 
+SEG_ID_FIELD = "id"
 SEG_PEAK_SPEED_FIELD = "peak_speed"
 SEG_FREE_SPEED_FIELD = "free_speed"
+SEG_ROUTE_LIST_FIELD = "route_list"
 # For Pat's test:- these are "Stop1N", "Stop2N"
 SEG_STOP_1_NAME_FIELD = "pt_a"
 SEG_STOP_2_NAME_FIELD = "pt_b"
