@@ -174,11 +174,10 @@ def add_service_period(days_week_str, schedule):
 
 def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
         mode_config, schedule, use_seg_speeds):
-    """This function creates the GTFS trip and stoptime entries for every
-    trip.
+    """This function creates the GTFS trip and stoptime entries for every trip.
 
-    It requires route definitions linking route names to a definition of segments
-    in a shapefile.
+    It requires route definitions linking route names to a definition of
+    segments in a shapefile.
     """ 
 
     # Initialise trip_id and counter
@@ -189,15 +188,16 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
         print "Adding trips and stops for route '%s'" % (route_def['name'])
         gtfs_route_id = str(mode_config['index'] + ii)
         #Re-grab the route entry from our GTFS schedule
-        route = [r for r in schedule.GetRouteList() if r.route_id == gtfs_route_id][0]
+        route = [r for r in schedule.GetRouteList() \
+            if r.route_id == gtfs_route_id][0]
         # For our basic scheduler, we're going to just create both trips in
         # both directions, starting at exactly the same time, at the same
         # frequencies. The real-world implication of this is at least
         # 2 vehicles needed to service each route.
         for dir_id, direction in enumerate(route_def["directions"]):
             headsign = direction
-            # Pre-calculate the stops list and save relevant info related to speed
-            # calculation from shapefiles for later.
+            # Pre-calculate the stops list and save relevant info related to 
+            # speed calculation from shapefiles for later.
             # as this is a moderately expensive operation.
             # This way we do this just once per route and direction.
             prebuilt_stop_info_list = build_stop_list_and_seg_info_along_route(
@@ -331,8 +331,8 @@ def get_other_stop_name(segment, stop_name):
 
 def get_stop_order(segment, next_seg):
     """Use the fact that for two segments, in the first segment, there must be
-    a matching stop with the 2nd segment. Return the IDs of the 1st and 2nd stops in the
-    first segment."""
+    a matching stop with the 2nd segment. Return the IDs of the 1st and 2nd 
+    stops in the first segment."""
     seg_stop_name_a = segment.GetField(tp_model.SEG_STOP_1_NAME_FIELD)
     seg_stop_name_b = segment.GetField(tp_model.SEG_STOP_2_NAME_FIELD)
     next_seg_stop_name_a = next_seg.GetField(tp_model.SEG_STOP_1_NAME_FIELD)
@@ -448,9 +448,10 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time,
             "skipping." % route_def["name"]
         return
 
-    # We will also create the stopping time object as a timedelta, as this way it will handle
-    # trips that cross midnight the way GTFS requires (as a number that can increases past
-    # 24:00 hours, rather than ticking back to 00:00)
+    # We will also create the stopping time object as a timedelta, as this way
+    # it will handle trips that cross midnight the way GTFS requires
+    # (as a number that can increases past 24:00 hours,
+    # rather than ticking back to 00:00)
     start_time_delta = datetime.combine(date.today(), trip_start_time) - \
         datetime.combine(date.today(), time(0))
     cumulative_time_on_trip = timedelta(0)
@@ -472,7 +473,8 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time,
         # time_delta, suited for GTFS.
         stop_time_delta = start_time_delta + cumulative_time_on_trip
         time_at_stop = (datetime.min + stop_time_delta).time()
-        time_sec_for_gtfs = stop_time_delta.days * 24*60*60 + stop_time_delta.seconds
+        time_sec_for_gtfs = stop_time_delta.days * 24*60*60 \
+            + stop_time_delta.seconds
         gtfs_stop_time = transitfeed.StopTime(
             problems, 
             s_info.gtfs_stop,
@@ -486,12 +488,13 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time,
             )
         trip.AddStopTimeObject(gtfs_stop_time)
         if VERBOSE:
-            print "Added stop # %d for this route (stop ID %s) - at t %s" % (stop_seq, \
-                gtfs_stop.stop_id, stop_time_delta)
+            print "Added stop # %d for this route (stop ID %s) - at t %s" \
+                % (stop_seq, gtfs_stop.stop_id, stop_time_delta)
 
         # Given elapsed time at stop we just added:- have we just crossed over
-        # int peak period of schedule for this mode? Will affect calc. time to next stop.
-        # N.B.: first part of check is - for last trips of the 'day' (even if after
+        # int peak period of schedule for this mode? Will affect calc. time to
+        # next stop.
+        # N.B.: first part of check is- for last trips of the 'day' (even if after
         # (midnite), they will may still be on the road/rails after the
         # nominal end time of the period. In this case, just keep going
         # in same conditions of current period.
@@ -543,9 +546,11 @@ if __name__ == "__main__":
     parser = OptionParser()
     parser.add_option('--routedefs', dest='routedefs', 
         help='CSV file listing name, directions, and segments of each route.')
-    parser.add_option('--segments', dest='inputsegments', help='Shapefile of line segments.')
+    parser.add_option('--segments', dest='inputsegments', help='Shapefile '\
+        'of line segments.')
     parser.add_option('--stops', dest='inputstops', help='Shapefile of stops.')
-    parser.add_option('--service', dest='service', help="Should be 'train', 'tram' or 'bus'.")
+    parser.add_option('--service', dest='service', help="Should be 'train', "\
+        "'tram' or 'bus'.")
     parser.add_option('--output', dest='output', help='Path of output file. '\
         'Should end in .zip')
     parser.add_option('--usesegspeeds', dest='usesegspeeds', 
