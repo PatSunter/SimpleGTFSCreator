@@ -390,11 +390,15 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
             # special case for a route with only one segment.
             if len(segments) == 1:
                 if dir_id == 0:
-                    first_stop_name = segment.GetField(tp_model.SEG_STOP_1_NAME_FIELD)
-                    second_stop_name = segment.GetField(tp_model.SEG_STOP_2_NAME_FIELD)
+                    first_stop_name = segment.GetField(
+                        tp_model.SEG_STOP_1_NAME_FIELD)
+                    second_stop_name = segment.GetField(
+                        tp_model.SEG_STOP_2_NAME_FIELD)
                 else:    
-                    first_stop_name = segment.GetField(tp_model.SEG_STOP_2_NAME_FIELD)
-                    second_stop_name = segment.GetField(tp_model.SEG_STOP_1_NAME_FIELD)
+                    first_stop_name = segment.GetField(
+                        tp_model.SEG_STOP_2_NAME_FIELD)
+                    second_stop_name = segment.GetField(
+                        tp_model.SEG_STOP_1_NAME_FIELD)
             else:        
                 next_seg_id = segments[seg_ctr+1]
                 next_seg = get_route_segment(next_seg_id, route_segments_lyr)
