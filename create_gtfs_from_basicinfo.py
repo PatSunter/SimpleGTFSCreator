@@ -40,9 +40,11 @@ def get_distance_km(segment):
     rdist = rdist / tp_model.ROUTE_DIST_RATIO_TO_KM
     return rdist
 
-def save_seq_stop_speed_info(seq_stop_info, next_segment, stops_lyr, use_seg_speeds):
+def save_seq_stop_speed_info(seq_stop_info, next_segment, stops_lyr,
+        use_seg_speeds):
     try:
-        seq_stop_info.peak_speed_next = next_segment.GetField(tp_model.SEG_PEAK_SPEED_FIELD)
+        seq_stop_info.peak_speed_next = next_segment.GetField(
+            tp_model.SEG_PEAK_SPEED_FIELD)
     except ValueError:
         if use_seg_speeds == True:
             print "ERROR: you asked to use per-segment speeds when calculating "\
@@ -53,7 +55,8 @@ def save_seq_stop_speed_info(seq_stop_info, next_segment, stops_lyr, use_seg_spe
             # Ok to continue in this case.
             pass
     try:
-        seq_stop_info.free_speed_next = next_segment.GetField(tp_model.SEG_FREE_SPEED_FIELD)
+        seq_stop_info.free_speed_next = next_segment.GetField(
+            tp_model.SEG_FREE_SPEED_FIELD)
     except ValueError:
         if use_seg_speeds == True:
             print "ERROR: you asked to use per-segment speeds when calculating "\
@@ -202,8 +205,8 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
                 mode_config, schedule, use_seg_speeds)
             
             # N.B.: Possible we might want to convert
-            # the services_info of headway periods to a configurable per-route later 
-            # rather than per mode...
+            # the services_info of headway periods to a configurable per-route 
+            # later rather than per mode...
             services_info = mode_config['services_info']
             for serv_period, serv_headways in services_info:
                 print "Handing service period '%s'" % (serv_period)
@@ -217,7 +220,8 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
                     curr_period_inc = timedelta(0)
                     curr_period_start = serv_headways[curr_period][0]
                     curr_period_end = serv_headways[curr_period][1]
-                    period_duration = datetime.combine(date.today(), curr_period_end) - \
+                    period_duration = datetime.combine(date.today(), \
+                        curr_period_end) - \
                         datetime.combine(date.today(), curr_period_start)
                     # This logic needed to handle periods that cross midnight
                     if period_duration < timedelta(0):
@@ -240,13 +244,14 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
                         trip_ctr += 1
                         # Now update necessary variables ...
                         curr_period_inc += curr_headway
-                        next_start_time = (datetime.combine(date.today(), curr_start_time) 
-                            + curr_headway).time()
+                        next_start_time = (datetime.combine(date.today(), \
+                            curr_start_time) + curr_headway).time()
                         curr_start_time = next_start_time
                     curr_period += 1
     return                            
 
-def calc_time_on_next_segment(seq_stop_info, mode_config, use_seg_speeds, peak_status):
+def calc_time_on_next_segment(seq_stop_info, mode_config, use_seg_speeds,
+        peak_status):
     """Calculates travel time between two stops. Current algorithm is based on
     an average speed on that segment, and physical distance between them."""
     if use_seg_speeds is True:
@@ -365,8 +370,8 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
             % route_def["name"]
         return []
 
-    # If direction ID is 1 - generally "away from city" - create an list in reverse
-    #  stop id order.
+    # If direction ID is 1 - generally "away from city" - 
+    # create an list in reverse stop id order.
     # N.B. :- created this temporary list since we now need to look ahead to
     # check for 'matching' stops in segments.
     if dir_id == 0:
