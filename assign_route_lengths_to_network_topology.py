@@ -90,33 +90,28 @@ def calc_distance(route, stops):
     assert len(stop_points_tform) == 2
 
     route_coords = route_geom.GetPoints()
-    distances = [[], []]
     on_sections = [None, None]
     min_dist_to_sec = [1e30, 1e30]
     num_route_coords = len(route_coords)    
     for ver_ii, route_coord in enumerate(route_coords):
         route_pt = ogr.Geometry(ogr.wkbPoint)
         route_pt.AddPoint(*route_coord)
-        distances[0].append(route_pt.Distance(stop_points_tform[0]))
-        distances[1].append(route_pt.Distance(stop_points_tform[1]))
         if ver_ii != num_route_coords-1:
             next_seg = ogr.Geometry(ogr.wkbLineString)
             next_seg.AddPoint(*route_coords[ver_ii])
             next_seg.AddPoint(*route_coords[ver_ii+1])
             for stop_ii, stop_point in enumerate(stop_points_tform):
-                dist = next_seg.Distance(stop_point)
-                if dist < min_dist_to_sec[stop_ii]:
-                    min_dist_to_sec[stop_ii] = dist
-                if dist <= STOP_ON_ROUTE_CHECK_DIST:
-                    on_sections[stop_ii] = (ver_ii, ver_ii+1)
-    min_i0, min_d0 = min(enumerate(distances[0]), key=operator.itemgetter(1))
-    min_i1, min_d1 = min(enumerate(distances[1]), key=operator.itemgetter(1))
-    min_is = [min_i0, min_i1]
-    min_ds = [min_d0, min_d1]
+                if on_sections[stop_ii] is None:
+                    dist = next_seg.Distance(stop_point)
+                    if dist < min_dist_to_sec[stop_ii]:
+                        min_dist_to_sec[stop_ii] = dist
+                    if dist <= STOP_ON_ROUTE_CHECK_DIST:
+                        on_sections[stop_ii] = (ver_ii, ver_ii+1)
+        if None not in on_sections:            
+            #Finish early if we can.
+            break
 
     #print "On sections were %s, %s" % tuple(on_sections)
-    #print "Min distances were %f [%d], %f [%d] (m)" \
-    #    % (min_d0, min_i0, min_d1, min_i1)
 
     for ii, on_sec in enumerate(on_sections):
         if on_sec == None:
@@ -126,10 +121,6 @@ def calc_distance(route, stops):
                 "section of route %s. Minimum dist to sec. was %.2f" % \
                 (stop_id, stop_coords[ii], route_id, min_dist_to_sec[ii])
             return -1
-    # Pat S, 13/5/2014: I've upped these minimum distance tests to much larger
-    # values. In the case of long straight line routes, this is conceivable.
-    # The on_sections is the key test for validity now.
-    assert max(min_ds) < 10000
 
     if on_sections[0] > on_sections[1]:
         on_sections.reverse()
@@ -137,9 +128,6 @@ def calc_distance(route, stops):
         stop_coords.reverse()
         stop_coords_tform.reverse()
         stop_points_tform.reverse()
-        min_is.reverse()
-        min_ds.reverse()
-        #distances.reverse()
 
     subline = ogr.Geometry(ogr.wkbLineString)
 
