@@ -46,7 +46,7 @@ def order_based_on_links(rsegtuples, seglinks):
             startseg = seg
             break
     if startseg is None:
-        print "Error: for route %s, no segment with 1 link." % rname
+        print "Error: no segment with 1 link."
         sys.exit(1)
     ordered_segtuples = [getsegtuple(startseg, rsegtuples)]
     lastlinkseg = startseg
@@ -55,7 +55,10 @@ def order_based_on_links(rsegtuples, seglinks):
         currsegtuple = getsegtuple(currseg, rsegtuples)
         ordered_segtuples.append(currsegtuple)
         links = seglinks[currseg]
-        assert len(links) <= 2
+        if len(links) > 2:
+            print "Error, segment %d is linked to %d other segments %s" %\
+                (currseg, len(links), links)
+            sys.exit(1)    
         if len(links) == 1:
             break
         nextlinkseg = None
@@ -65,6 +68,15 @@ def order_based_on_links(rsegtuples, seglinks):
         lastlinkseg = currseg
         currseg = nextlinkseg
 
+    if len(rsegtuples) != len(ordered_segtuples):
+        print "Error: total # segments for this route is %d, but only "\
+            "found a linked chain of %d segments." \
+            % (len(rsegtuples), len(ordered_segtuples))
+        print "Unlinked segments (and their stops):"
+        for seg in rsegtuples:
+            if seg not in ordered_segtuples:
+                print "\t%s" % (str(seg))
+        sys.exit(1)    
     return ordered_segtuples
 
 def process_all_routes(input_shp_fname, output_fname):
@@ -94,6 +106,7 @@ def process_all_routes(input_shp_fname, output_fname):
     routes_ordered = {}
     route_dirs = {}
     for rname, rsegtuples in all_routes.iteritems():
+        print "Processing route '%s'" % rname
 
         if len(rsegtuples) == 1:
             routes_ordered[rname] = rsegtuples
