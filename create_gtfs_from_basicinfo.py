@@ -11,6 +11,7 @@ import copy
 from datetime import datetime, date, time, timedelta
 from optparse import OptionParser
 import sys
+from operator import itemgetter
 
 import pyproj
 import osgeo.ogr
@@ -32,6 +33,9 @@ class Seq_Stop_Info:
         self.dist_km_to_next = 0
         self.peak_speed_next = 0
         self.free_speed_next = 0
+
+def get_route_num(routeDictEntry):
+    return int(routeDictEntry['name'][1:])
 
 def get_distance_km(segment):
     # In H's script, this will be saved as an attribute in the generation
@@ -184,7 +188,7 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
     trip_ctr = 0
     # Do routes and directions as outer loops rather than service periods - as 
     # allows maximal pre-calculation
-    for ii, route_def in enumerate(route_defs):
+    for ii, route_def in enumerate(sorted(route_defs, key=get_route_num)):
         print "Adding trips and stops for route '%s'" % (route_def['name'])
         gtfs_route_id = str(mode_config['index'] + ii)
         #Re-grab the route entry from our GTFS schedule
@@ -358,12 +362,27 @@ def get_stop_order(segment, next_seg):
         sys.exit(1)       
     return first_stop_name, second_stop_name
 
+def build_segs_lookup_table(route_segments_lyr):
+    lookup_dict = {}
+    for feature in route_segments_lyr:
+        seg_id = (feature.GetField('id'))
+        lookup_dict[int(seg_id)] = feature
+    route_segments_lyr.ResetReading()
+    return lookup_dict
+
 def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_shp,
         stops_shp, mode_config, schedule, use_seg_speeds):
 
     prebuilt_stop_info_list = []
     route_segments_lyr = route_segments_shp.GetLayer(0)
     stops_lyr = stops_shp.GetLayer(0)
+
+    # Apply a filter to speed up calculations.
+    where_clause = "%s LIKE '%%%s' OR %s LIKE '%%%s,%%'" % \
+        (tp_model.SEG_ROUTE_LIST_FIELD, route_def["name"],\
+        tp_model.SEG_ROUTE_LIST_FIELD, route_def["name"])
+    route_segments_lyr.SetAttributeFilter(where_clause)
+    segs_lookup_table = build_segs_lookup_table(route_segments_lyr)
 
     if len(route_def['segments']) == 0:
         print "Warning: for route name '%s', no route segments defined." \
@@ -381,7 +400,8 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
 
     stop_seq = 0
     for seg_ctr, segment_id in enumerate(segments):
-        segment = get_route_segment(segment_id, route_segments_lyr)
+        # segment = get_route_segment(segment_id, route_segments_lyr)
+        segment = segs_lookup_table[segment_id]
         if segment is None:
             print "Error: didn't locate segment in shapefile with given id " \
                 "%d." % (segment_id)
@@ -401,8 +421,10 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
                         tp_model.SEG_STOP_1_NAME_FIELD)
             else:        
                 next_seg_id = segments[seg_ctr+1]
-                next_seg = get_route_segment(next_seg_id, route_segments_lyr)
-                first_stop_name, second_stop_name = get_stop_order(segment, next_seg)
+                #next_seg = get_route_segment(next_seg_id, route_segments_lyr)
+                next_seg = segs_lookup_table[next_seg_id]
+                first_stop_name, second_stop_name = get_stop_order(segment,
+                    next_seg)
         else:
             first_stop_name = prev_second_stop_name
             second_stop_name = get_other_stop_name(segment, first_stop_name)
@@ -429,6 +451,10 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
     s_info_final = Seq_Stop_Info(final_stop)
     # Final stop doesn't have speed etc on segment, so leave as zero.
     prebuilt_stop_info_list.append(s_info_final)
+    for segment in segs_lookup_table.itervalues():
+        # tidy up memory.
+        segment.Destroy()
+    route_segments_lyr.SetAttributeFilter(None)
     return prebuilt_stop_info_list
 
 def create_gtfs_trip_stoptimes(trip, trip_start_time,
@@ -441,7 +467,8 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time,
 
     if VERBOSE:
         print "\n%s() called on route '%s', trip_id = %d, trip start time %s"\
-            % (inspect.stack()[0][3], route_def["name"], trip.trip_id, str(trip_start_time))
+            % (inspect.stack()[0][3], route_def["name"], trip.trip_id,\
+                str(trip_start_time))
 
     if len(route_def['segments']) == 0:
         print "Warning: for route name '%s', no route segments defined " \
@@ -535,7 +562,7 @@ def process_data(route_defs_csv_fname, input_segments_fname,
     stops_shp = None
     route_segments_shp = None
 
-    schedule.Validate()
+    #schedule.Validate()
     schedule.WriteGoogleTransitFeed(output)
 
 def str2bool(v):
