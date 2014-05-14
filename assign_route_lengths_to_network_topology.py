@@ -29,6 +29,9 @@ COMPARISON_EPSG = 28355
 
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
+ 
+def get_route_num_from_feature(route):
+    return int(route.GetField(tp_model.ROUTE_NAME_FIELD)[1:])
 
 # Note:- could possibly also use the shapely length function, or 
 # geopy has a Vincenty Distance implementation
@@ -261,10 +264,13 @@ def calc_all_route_segment_lengths(route, segments_lyr, stops_lyr,
 
 def calc_all_route_segment_lengths_all_routes(route_lyr, segments_lyr,
         stops_lyr, update=False):
-    for route in route_lyr:
+    # This dict allows going thru routes in sorted order, convenient for user.
+    sorted_route_list = sorted(route_lyr, key=get_route_num_from_feature)
+    for route in sorted_route_list:
         calc_all_route_segment_lengths(route, segments_lyr, stops_lyr,
             update)
-                
+        route.Destroy()    
+
 def testing():    
     fname = os.path.expanduser('/Users/pds_phd/Dropbox/PhD-TechnicalProjectWork/OSSTIP_BZE/Melbourne_GIS_NetworkDataWork/BZE_New_Network/QGISnetwork/in/shp/network-self-snapped-reworked-patextend-201405.shp')
     route_shape = osgeo.ogr.Open(fname, 0) 
