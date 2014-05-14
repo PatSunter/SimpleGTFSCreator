@@ -562,7 +562,7 @@ def process_data(route_defs_csv_fname, input_segments_fname,
     stops_shp = None
     route_segments_shp = None
 
-    #schedule.Validate()
+    schedule.Validate()
     schedule.WriteGoogleTransitFeed(output)
 
 def str2bool(v):
