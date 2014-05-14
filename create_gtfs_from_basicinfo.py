@@ -11,6 +11,7 @@ import copy
 from datetime import datetime, date, time, timedelta
 from optparse import OptionParser
 import sys
+import os.path
 from operator import itemgetter
 
 import pyproj
@@ -76,6 +77,10 @@ def save_seq_stop_speed_info(seq_stop_info, next_segment, stops_lyr,
 def read_route_defs(csv_file_name):
     route_defs = []
     csv_file = open(csv_file_name, 'r')
+    if csv_file is None:
+        print "Error, route mapping CSV file given, %s , failed to open." \
+            % (csv_file_name)
+        sys.exit(1) 
     reader = csv.reader(csv_file, delimiter=';', quotechar="'") 
     # skip headings
     reader.next()
@@ -93,20 +98,17 @@ def read_route_defs(csv_file_name):
 def create_gtfs_route_entries(route_defs, mode_config, schedule):
     print "%s() called." % inspect.stack()[0][3]
     # Routes
-    for ii, route_def in enumerate(route_defs):
+    for ii, route_def in enumerate(sorted(route_defs, key=get_route_num)):
         route_long_name = route_def["name"]
         route_short_name = None
         route_description = None
         route_id = str(mode_config['index'] + ii)
-
-        # Add our route
         route = transitfeed.Route(
             short_name = route_short_name, 
             long_name = route_long_name,
             route_type = mode_config['system'],
             route_id = route_id
-        )
-
+            )
         print "Adding route with ID %s, name '%s'" % \
             (route_id, route_long_name)
         schedule.AddRouteObject(route)
@@ -552,7 +554,15 @@ def process_data(route_defs_csv_fname, input_segments_fname,
     # Now see if we can open both needed shape files correctly
     route_defs = read_route_defs(route_defs_csv_fname)
     route_segments_shp = osgeo.ogr.Open(input_segments_fname)
+    if route_segments_shp is None:
+        print "Error, route segments shape file given, %s , failed to open." \
+            % (input_segments_fname)
+        sys.exit(1) 
     stops_shp = osgeo.ogr.Open(input_stops_fname)
+    if stops_shp is None:
+        print "Error, stops shape file given, %s , failed to open." \
+            % (input_stops_fname)
+        sys.exit(1)
     # Now do actual data processing
     create_gtfs_route_entries(route_defs, mode_config, schedule)
     create_gtfs_stop_entries(stops_shp, mode_config, schedule)
@@ -603,5 +613,10 @@ if __name__ == "__main__":
 
     mode_config = m_t_info.settings[options.service]
 
-    process_data(options.routedefs, options.inputsegments, options.inputstops,
-        mode_config, options.output, use_seg_speeds)
+    process_data(
+        os.path.expanduser(options.routedefs),
+        os.path.expanduser(options.inputsegments), 
+        os.path.expanduser(options.inputstops),
+        mode_config,
+        os.path.expanduser(options.output),
+        use_seg_speeds)
