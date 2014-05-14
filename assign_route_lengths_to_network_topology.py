@@ -14,11 +14,18 @@ from osgeo import ogr, osr
 
 import topology_shapefile_data_model as tp_model
 
+# All of these distances are in meters. Will project into
+# chosen EPSG for testing, so set it appropriate to your region.
 #STOP_ON_ROUTE_CHECK_DIST = 0.1
 # Found some cases of 1m, so up to 5m here.
 STOP_ON_ROUTE_CHECK_DIST = 5
 ON_LINE_CHECK_DIST = 0.1
 ON_POINT_CHECK_DIST = 0.01
+
+# Chose EPSG:28355 ("GDA94 / MGA zone 55") as an appropriate projected
+    # spatial ref. system, in meters, for the Melbourne region.
+    #  (see http://spatialreference.org/ref/epsg/gda94-mga-zone-55/)
+COMPARISON_EPSG = 28355
 
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
@@ -44,10 +51,10 @@ def haversine(lon1, lat1, lon2, lat2):
 
 def calc_length_along_line_haversine(line_geom):
     line_lat_lon = ogr.Geometry(ogr.wkbLineString)
-    src = line_geom.GetSpatialReference()
-    target = osr.SpatialReference()
-    target.ImportFromEPSG(4326)
-    transform = osr.CoordinateTransformation(src, target)
+    src_srs = line_geom.GetSpatialReference()
+    target_srs = osr.SpatialReference()
+    target_srs.ImportFromEPSG(4326)
+    transform = osr.CoordinateTransformation(src_srs, target_srs)
     for pt in line_geom.GetPoints():
         line_lat_lon.AddPoint(*pt)
     line_lat_lon.Transform(transform)
@@ -75,31 +82,37 @@ def calc_distance(route, stops):
         stop_coords.append(*stop_geom.GetPoints())
     #print "Stop coords are: %s" % (stop_coords)
 
+    target_srs = osr.SpatialReference()
+    target_srs.ImportFromEPSG(COMPARISON_EPSG)
+
     stop_points_tform = []
     stop_coords_tform = []
+    src_srs = stop_geoms[0].GetSpatialReference()
+    transform = osr.CoordinateTransformation(src_srs, target_srs)
     for ii, coord in enumerate(stop_coords):
         stop_points_tform.append(ogr.Geometry(ogr.wkbPoint))
         stop_points_tform[-1].AddPoint(*coord)
-
-        src = stop_geoms[0].GetSpatialReference()
-        target = route_geom.GetSpatialReference()
-        transform = osr.CoordinateTransformation(src, target)
         stop_points_tform[-1].Transform(transform)
         stop_coords_tform.append(stop_points_tform[-1].GetPoint())
 
-    assert len(stop_points_tform) == 2
-
     route_coords = route_geom.GetPoints()
+    src_srs = route_geom.GetSpatialReference()
+    transform = osr.CoordinateTransformation(src_srs, target_srs)
+    route_coords_tform = []
+    for ii, coord in enumerate(route_coords):
+        pt = ogr.Geometry(ogr.wkbPoint)
+        pt.AddPoint(*coord)
+        pt.Transform(transform)
+        route_coords_tform.append(pt.GetPoints()[0])
+
     on_sections = [None, None]
     min_dist_to_sec = [1e30, 1e30]
-    num_route_coords = len(route_coords)    
-    for ver_ii, route_coord in enumerate(route_coords):
-        route_pt = ogr.Geometry(ogr.wkbPoint)
-        route_pt.AddPoint(*route_coord)
+    num_route_coords = len(route_coords_tform)    
+    for ver_ii, route_coord in enumerate(route_coords_tform):
         if ver_ii != num_route_coords-1:
             next_seg = ogr.Geometry(ogr.wkbLineString)
-            next_seg.AddPoint(*route_coords[ver_ii])
-            next_seg.AddPoint(*route_coords[ver_ii+1])
+            next_seg.AddPoint(*route_coords_tform[ver_ii])
+            next_seg.AddPoint(*route_coords_tform[ver_ii+1])
             for stop_ii, stop_point in enumerate(stop_points_tform):
                 if on_sections[stop_ii] is None:
                     dist = next_seg.Distance(stop_point)
@@ -107,7 +120,7 @@ def calc_distance(route, stops):
                         min_dist_to_sec[stop_ii] = dist
                     if dist <= STOP_ON_ROUTE_CHECK_DIST:
                         on_sections[stop_ii] = (ver_ii, ver_ii+1)
-        if None not in on_sections:            
+        if None not in on_sections:
             #Finish early if we can.
             break
 
@@ -130,6 +143,7 @@ def calc_distance(route, stops):
         stop_points_tform.reverse()
 
     subline = ogr.Geometry(ogr.wkbLineString)
+    subline.AssignSpatialReference(target_srs)
 
     if on_sections[0] == on_sections[1]:
         #Both stops are on the same section. So subline is just between two
@@ -138,21 +152,21 @@ def calc_distance(route, stops):
         subline.AddPoint(*stop_coords_tform[1])
     else:
         first_pt = ogr.Geometry(ogr.wkbPoint)
-        first_pt.AddPoint(*route_coords[on_sections[0][0]])
+        first_pt.AddPoint(*route_coords_tform[on_sections[0][0]])
         if first_pt.Distance(stop_points_tform[0]) > ON_POINT_CHECK_DIST: 
             #print "Starting subline at lower stop"
             subline.AddPoint(*stop_coords_tform[0])
         else:    
             #print "Starting subline at vertex %d" % on_sections[0][0]
-            subline.AddPoint(*route_coords[on_sections[0][0]])
+            subline.AddPoint(*route_coords_tform[on_sections[0][0]])
         # now, add all intervening points.
         for pt_ii in range(on_sections[0][0]+1, on_sections[1][0]+1):
             #print "Adding to subline vertex %d" % pt_ii
-            subline.AddPoint(*route_coords[pt_ii])
+            subline.AddPoint(*route_coords_tform[pt_ii])
         last_sec_start_pt = ogr.Geometry(ogr.wkbPoint)
-        last_sec_start_pt.AddPoint(*route_coords[on_sections[1][0]])
+        last_sec_start_pt.AddPoint(*route_coords_tform[on_sections[1][0]])
         last_pt = ogr.Geometry(ogr.wkbPoint)
-        last_pt.AddPoint(*route_coords[on_sections[1][1]])
+        last_pt.AddPoint(*route_coords_tform[on_sections[1][1]])
         dist_last_sec_start = last_sec_start_pt.Distance(stop_points_tform[1])
         if dist_last_sec_start <= ON_POINT_CHECK_DIST:
             # We don't need to add any more for last section.
@@ -162,9 +176,8 @@ def calc_distance(route, stops):
             subline.AddPoint(*stop_coords_tform[1])
         else:    
             #print "Finishing subline at vertex %d" % on_sections[1][1]
-            subline.AddPoint(*route_coords[on_sections[1][1]])
+            subline.AddPoint(*route_coords_tform[on_sections[1][1]])
             
-    subline.AssignSpatialReference(route_geom.GetSpatialReference())
     #print subline.GetPoints()
     #length = subline.Length()
     #print "Length was %d meters." % round(length)
@@ -207,9 +220,9 @@ def calc_all_route_segment_lengths(route, segments_lyr, stops_lyr,
     # First we will sub-select stops, only based on those around route
     route_geom = route.GetGeometryRef()
     route_buffer = route_geom.Buffer(STOP_ON_ROUTE_CHECK_DIST)
-    src = route_geom.GetSpatialReference()
-    target = stops_lyr.GetSpatialRef()
-    transform = osr.CoordinateTransformation(src, target)
+    src_srs = route_geom.GetSpatialReference()
+    target_srs = stops_lyr.GetSpatialRef()
+    transform = osr.CoordinateTransformation(src_srs, target_srs)
     route_buffer.Transform(transform)
     stops_lyr.SetSpatialFilter(route_buffer)
 
