@@ -178,7 +178,6 @@ if __name__ == "__main__":
             % (options.inputsegments)
         sys.exit(1)    
     assign_free_speeds_constant(route_segments_shp, mode_config)
-    #assign_peak_speeds_portion_free_speed(route_segments_shp, mode_config)
     #assign_peak_speeds_bus_melb_distance_based(route_segments_shp, mode_config)
     assign_peak_speeds_constant(route_segments_shp, mode_config)
     # Close the shape files - includes making sure it writes
