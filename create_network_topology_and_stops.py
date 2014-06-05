@@ -94,6 +94,7 @@ def add_stop(stops_lyr, stops_multipoint, stop_type, stop_geom, src_srs):
     stop_feat.SetField("typ", stop_type)
     stops_lyr.CreateFeature(stop_feat)
     stop_feat.Destroy()
+    return pt_id
 
 def get_min_dist_from_existing_stops(pt_geom, stops_multipoint):
     if stops_multipoint.GetGeometryCount() >= 1:
@@ -102,16 +103,33 @@ def get_min_dist_from_existing_stops(pt_geom, stops_multipoint):
         dist_from_existing = sys.maxint
     return dist_from_existing    
 
+# TODO: delete this? Not recommended for use, the "pre-buffer" approach had
+# problems.
 def get_min_dist_other_stop_also_on_route(search_point_geom,
         route_sec_within_range, stops_multipoint, within_range_buffer):
     stops_multipoint_in_buffer = stops_multipoint.Intersection(
         within_range_buffer)
     min_dist_also_on_line = sys.maxint
-    for stop_geom in stops_multipoint_in_buffer:
+    if stops_multipoint_in_buffer.GetGeometryCount() > 0:
+        # A multipoint - iterate through all
+        for stop_geom in stops_multipoint_in_buffer:
+            if stop_geom.Distance(route_sec_within_range) < VERY_NEAR_LINE:
+                dist_to_new_pt = stop_geom.Distance(search_point_geom)
+                if dist_to_new_pt < min_dist_also_on_line:
+                    min_dist_also_on_line = dist_to_new_pt
+    elif stops_multipoint_in_buffer.GetPointCount() == 1:   
+        # A single point - just check it
+        stop_geom = stops_multipoint_in_buffer
         if stop_geom.Distance(route_sec_within_range) < VERY_NEAR_LINE:
             dist_to_new_pt = stop_geom.Distance(search_point_geom)
             if dist_to_new_pt < min_dist_also_on_line:
                 min_dist_also_on_line = dist_to_new_pt
+    else:
+        # no points.
+        assert stops_multipoint_in_buffer.GetGeometryName() == \
+            "GEOMETRYCOLLECTION"
+        assert stops_multipoint_in_buffer.GetPointCount() == 0
+        pass
     return min_dist_also_on_line
 
 def get_stops_already_on_route_within_dist(new_pt, route_geom,
@@ -168,7 +186,7 @@ def add_route_start_end_stops(stops_lyr, input_routes_lyr, stops_multipoint):
                 #    "there is a stop here already."
                 pass
             else:
-                add_stop(stops_lyr, stops_multipoint, ROUTE_START_END_NAME,
+                stop_id = add_stop(stops_lyr, stops_multipoint, ROUTE_START_END_NAME,
                     pt, src_srs)
                 #print "...Adding stop at route start/end"
     input_routes_lyr.ResetReading()
@@ -299,9 +317,9 @@ def add_key_intersection_points_as_stops(isect_line, stops_lyr,
                 "%.1fm on this route and other route, so skipping." \
                     % min_dist_also_on_both_routes
             else:    
-                print "...and adding a stop here."
-                add_stop(stops_lyr, stops_multipoint, TRANSFER_SELF_NAME,
+                stop_id = add_stop(stops_lyr, stops_multipoint, TRANSFER_SELF_NAME,
                     new_pt, src_srs)
+                print "...and adding a stop here: B%d." % stop_id
                 # A final check. Need to make sure stops get placed 
                 # where _both_ bus lines will find them in segmenting
                 # algorithm later.
@@ -321,8 +339,9 @@ def add_key_intersection_points_as_stops(isect_line, stops_lyr,
                     new_pt_other = get_nearest_point_on_route_within_buf_fast(
                         new_pt, other_route_geom, other_route_in_range)
                     assert new_pt_other is not None
-                    add_stop(stops_lyr, stops_multipoint, TRANSFER_SELF_NAME,
+                    stop_id = add_stop(stops_lyr, stops_multipoint, TRANSFER_SELF_NAME,
                         new_pt_other, src_srs)
+                    print "...Stop ID was B%d" % stop_id  
     return            
 
 def add_self_transfer_stops(stops_lyr, input_routes_lyr, stops_multipoint):
@@ -358,9 +377,7 @@ def add_self_transfer_stops(stops_lyr, input_routes_lyr, stops_multipoint):
  
 def add_nearest_point_on_route_as_stop(route_sec_within_range, stops_lyr,
         stops_multipoint, route_geom, other_s_geom, other_s_buf,
-        stop_typ_name):
-    #import pdb
-    #pdb.set_trace()
+        stop_typ_name, stop_min_dist):
     route_geom_srs = route_geom.GetSpatialReference()
     closest_point_geom = get_nearest_point_on_route_within_buf_fast(
         other_s_geom, route_geom, route_sec_within_range)
@@ -373,18 +390,24 @@ def add_nearest_point_on_route_as_stop(route_sec_within_range, stops_lyr,
 
     # Now, need to check if there are other stops already added on this
     # line, within min dist to place stops.
-    min_dist_also_on_line = get_min_dist_other_stop_also_on_route(
-        closest_point_geom, route_sec_within_range, stops_multipoint,
-        other_s_buf)
-    print "...(calculated min dist to other stop on route as %.2f)" % \
-        min_dist_also_on_line    
-    if min_dist_also_on_line >= MIN_DIST_TO_PLACE_ISECT_STOPS:
-        print "...adding stop."
-        add_stop(stops_lyr, stops_multipoint, stop_typ_name,
-            closest_point_geom, route_geom_srs)
+    min_dist_also_on_route = get_stops_already_on_route_within_dist(
+        closest_point_geom, route_geom, stops_multipoint, 
+        stop_min_dist)
+    if min_dist_also_on_route == []:
+        min_dist_also_on_line = sys.maxint
+        print "...(calculated no other stops within dist.)"
     else:
-        print "...but not adding stop, since is < %.1fm to existing stop "\
-            "on this line." % MIN_DIST_TO_PLACE_ISECT_STOPS
+        min_dist_also_on_line = min_dist_also_on_route[0][1]
+        print "...(calculated min dist to other stop on route as %.2f)" % \
+            min_dist_also_on_line    
+
+    if min_dist_also_on_line >= stop_min_dist:
+        stop_id = add_stop(stops_lyr, stops_multipoint, stop_typ_name,
+            closest_point_geom, route_geom_srs)
+        print "...added stop B%d." % stop_id
+    else:
+        print "...not adding stop, since is < %.1fm (min dist this mode) "\
+            "to existing stop on this line." % stop_min_dist
         pass
     return
 
@@ -417,45 +440,50 @@ def add_other_network_transfer_stops(stops_lyr, input_routes_lyr,
                 route_geom = route.GetGeometryRef()
                 route_sec_within_range = route_geom.Intersection(
                     other_s_buf)
-                if route_sec_within_range.GetGeometryCount() == 0:
-                    if route_sec_within_range.GetPointCount() > 0:
-                        if other_stop.GetField("Name") == "HELL! Station"\
-                            and route.GetField(0) == "R16":
-                            driver = ogr.GetDriverByName("ESRI Shapefile")
-                            if os.path.exists("segs.shp"):
-                                os.unlink("segs.shp")
-                            segs_shp_file = driver.CreateDataSource("segs.shp")
-                            layer = segs_shp_file.CreateLayer("segs", 
-                                input_routes_lyr.GetSpatialRef(),
-                                ogr.wkbLineString)
-                            field = ogr.FieldDefn("station", ogr.OFTString)
-                            field.SetWidth(60)
-                            field = ogr.FieldDefn("route", ogr.OFTString)
-                            field.SetWidth(24)
-                            layer.CreateField(field)
-                            feat = ogr.Feature(stops_lyr.GetLayerDefn())
-                            feat.SetGeometry(route_sec_within_range)
-                            feat.SetField("station",
-                                other_stop.GetField("Name"))
-                            feat.SetField("route", route.GetField(0))
-                            layer.CreateFeature(feat)
-                            feat.Destroy()
-                            import pdb
-                            pdb.set_trace()
+                if other_stop.GetField("Name") == "HELL Port Junction/79 Whiteman St"\
+                        and route.GetField(0) == "R61":
+                    driver = ogr.GetDriverByName("ESRI Shapefile")
+                    if os.path.exists("segs.shp"):
+                        os.unlink("segs.shp")
+                    segs_shp_file = driver.CreateDataSource("segs.shp")
+                    layer = segs_shp_file.CreateLayer("segs", 
+                        input_routes_lyr.GetSpatialRef(),
+                        ogr.wkbLineString)
+                    field = ogr.FieldDefn("station", ogr.OFTString)
+                    field.SetWidth(60)
+                    layer.CreateField(field)
+                    field = ogr.FieldDefn("route", ogr.OFTString)
+                    field.SetWidth(24)
+                    layer.CreateField(field)
+                    feat = ogr.Feature(stops_lyr.GetLayerDefn())
+                    feat.SetGeometry(route_sec_within_range)
+                    feat.SetField("station",
+                        other_stop.GetField("Name"))
+                    feat.SetField("route", route.GetField(0))
+                    layer.CreateFeature(feat)
+                    feat.Destroy()
+                    import pdb
+                    pdb.set_trace()
 
-                        print "...sections of route %s within range..." %\
-                            route.GetField(0)    
-                        add_nearest_point_on_route_as_stop(
-                            route_sec_within_range,
-                            stops_lyr, stops_multipoint, route_geom,
-                            other_s_geom, other_s_buf, stop_typ_name)
-                else:
+                if route_sec_within_range.GetGeometryCount() == 0 \
+                        and route_sec_within_range.GetPointCount() > 0:
+                    # We think its a polyline. Operate on directly.
+                    print "...sections of route %s within range..." %\
+                        route.GetField(0)    
+                    add_nearest_point_on_route_as_stop(
+                        route_sec_within_range,
+                        stops_lyr, stops_multipoint, route_geom,
+                        other_s_geom, other_s_buf, stop_typ_name,
+                        isect_nw_def.stop_min_dist)
+                elif route_sec_within_range.GetGeometryCount() > 0:
+                    # We think there's multiple polylines. Operate on each.
                     print "...sections of route %s within range..." %\
                         route.GetField(0)    
                     for line in route_sec_within_range:
                         add_nearest_point_on_route_as_stop(line,
                             stops_lyr, stops_multipoint, route_geom,
-                            other_s_geom, other_s_buf, stop_typ_name)
+                            other_s_geom, other_s_buf, stop_typ_name,
+                            isect_nw_def.stop_min_dist)
             input_routes_lyr.ResetReading()
         tfer_nw_stop_shp.Destroy()    
     return
@@ -475,7 +503,7 @@ def create_stops(input_routes_lyr, stops_shp_file_name,
 
 if __name__ == "__main__":
     input_routes_fname = './network_topology_testing/network-self-snapped-reworked-patextend-201405.shp'
-    stops_shp_file_name = './network_topology_testing/network-self-snapped-reworked-patextend-201405-stops-tight-route-test-2.shp'
+    stops_shp_file_name = './network_topology_testing/network-self-snapped-reworked-patextend-201405-stops-tight-route-test-2-with_trams-180-min-dist.shp'
     segments_shp_file_name = './network_topology_testing/network-self-snapped-reworked-patextend-201405-segments.shp'
     fname = os.path.expanduser(input_routes_fname)
     input_routes_shp = osgeo.ogr.Open(fname, 0)
@@ -488,7 +516,7 @@ if __name__ == "__main__":
     transfer_networks_test = [
         ['./network_topology_testing/train_stop.shp', 350, 50, "TRANSFER_TRAIN"],
         # ['motorway_bus_stops.shp', 350m, 50m, "TRANSFER_MWAY_BUS"],
-        #['./network_topology_testing/tram_stop.shp', 200, 50, "TRANSFER_TRAM"],
+        ['./network_topology_testing/tram_stop.shp', 300, 180, "TRANSFER_TRAM"],
         ]
 
     transfer_networks_def = []
