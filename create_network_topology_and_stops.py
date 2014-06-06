@@ -11,7 +11,7 @@ import math
 import osgeo.ogr
 from osgeo import ogr, osr
 
-from project_onto_line import nearest_point_on_polyline_to_point
+import project_onto_line as lineargeom
 import topology_shapefile_data_model as tp_model
 
 class TransferNetworkDef:
@@ -40,10 +40,7 @@ FILLER_MAX_DIST = 500
 
 BUFFER_DIST_SELF_ROUTE_TRANSFER = 30.0
 CROSSING_ANGLE_FACTOR = 0.01
-DIST_FOR_MATCHING_STOPS_ON_ROUTES = 5.0 
 MIN_DIST_TO_PLACE_ISECT_STOPS = 80.0
-VERY_NEAR_LINE = 1.0
-SAME_POINT = 1.0
 
 def create_stops_shp_file(stops_shp_file_name):
     # OGR doesn't like relative paths
@@ -104,7 +101,7 @@ def get_min_dist_from_existing_stops(pt_geom, stops_multipoint):
     return dist_from_existing    
 
 # TODO: delete this? Not recommended for use, the "pre-buffer" approach had
-# problems.
+# problems with not having relevant points in range.
 def get_min_dist_other_stop_also_on_route(search_point_geom,
         route_sec_within_range, stops_multipoint, within_range_buffer):
     stops_multipoint_in_buffer = stops_multipoint.Intersection(
@@ -113,14 +110,16 @@ def get_min_dist_other_stop_also_on_route(search_point_geom,
     if stops_multipoint_in_buffer.GetGeometryCount() > 0:
         # A multipoint - iterate through all
         for stop_geom in stops_multipoint_in_buffer:
-            if stop_geom.Distance(route_sec_within_range) < VERY_NEAR_LINE:
+            dist_to_route = stop_geom.Distance(route_sec_within_range)
+            if  dist_to_route < lineargeom.VERY_NEAR_LINE:
                 dist_to_new_pt = stop_geom.Distance(search_point_geom)
                 if dist_to_new_pt < min_dist_also_on_line:
                     min_dist_also_on_line = dist_to_new_pt
     elif stops_multipoint_in_buffer.GetPointCount() == 1:   
         # A single point - just check it
         stop_geom = stops_multipoint_in_buffer
-        if stop_geom.Distance(route_sec_within_range) < VERY_NEAR_LINE:
+        dist_to_route = stop_geom.Distance(route_sec_within_range) 
+        if dist_to_route < lineargeom.VERY_NEAR_LINE:
             dist_to_new_pt = stop_geom.Distance(search_point_geom)
             if dist_to_new_pt < min_dist_also_on_line:
                 min_dist_also_on_line = dist_to_new_pt
@@ -141,7 +140,7 @@ def get_stops_already_on_route_within_dist(new_pt, route_geom,
     if stops_multipoint_in_buffer.GetGeometryCount() > 0:
         # A multipoint - iterate through each.
         for stop_geom in stops_multipoint_in_buffer:
-            if stop_geom.Distance(route_geom_in_buf) < VERY_NEAR_LINE:
+            if stop_geom.Distance(route_geom_in_buf) < lineargeom.VERY_NEAR_LINE:
                 dist_to_new_pt = stop_geom.Distance(new_pt)
                 if dist_to_new_pt < test_dist:
                     stops_on_route_within_dist.append((stop_geom.Clone(),
@@ -149,7 +148,7 @@ def get_stops_already_on_route_within_dist(new_pt, route_geom,
     elif stops_multipoint_in_buffer.GetPointCount() == 1:   
         # A single point - check it
         stop_geom = stops_multipoint_in_buffer
-        if stop_geom.Distance(route_geom_in_buf) < VERY_NEAR_LINE:
+        if stop_geom.Distance(route_geom_in_buf) < lineargeom.VERY_NEAR_LINE:
             dist_to_new_pt = stop_geom.Distance(new_pt)
             if dist_to_new_pt < test_dist:
                 stops_on_route_within_dist.append((stop_geom.Clone(),
@@ -160,10 +159,8 @@ def get_stops_already_on_route_within_dist(new_pt, route_geom,
             "GEOMETRYCOLLECTION"
         assert stops_multipoint_in_buffer.GetPointCount() == 0
         pass
-    stops_on_route_within_dist = sorted(stops_on_route_within_dist,
-        key=operator.itemgetter(1))
+    stops_on_route_within_dist.sort(key=operator.itemgetter(1))
     return stops_on_route_within_dist
-
 
 def add_route_start_end_stops(stops_lyr, input_routes_lyr, stops_multipoint):
     src_srs = input_routes_lyr.GetSpatialRef()
@@ -181,7 +178,7 @@ def add_route_start_end_stops(stops_lyr, input_routes_lyr, stops_multipoint):
                 stops_multipoint)
             #print "(Calc dist from existing for start/end pt %d as %.1f)" %\
             #    (ii, dist_from_existing)
-            if dist_from_existing < SAME_POINT:
+            if dist_from_existing < lineargeom.SAME_POINT:
                 #print "...not adding stop at stop at route start/end as "\
                 #    "there is a stop here already."
                 pass
@@ -198,7 +195,7 @@ def first_good_intersect_point(line_geom, other_line_geom,
     #  is very near line.
     # Else, just return the closest within buffer_dist *3
     line_geom_2 = line_geom.Clone()
-    line_geom_2.Segmentize(VERY_NEAR_LINE/2.0)
+    line_geom_2.Segmentize(lineargeom.VERY_NEAR_LINE/2.0)
     pts_list = line_geom_2.GetPoints()
     nearest_dist = sys.maxint
     nearest_index = 0
@@ -217,12 +214,12 @@ def first_good_intersect_point(line_geom, other_line_geom,
         if dist_from_other < nearest_dist:
             nearest_dist = dist_from_other
             nearest_index = ii
-        if dist_from_other < VERY_NEAR_LINE:
+        if dist_from_other < lineargeom.VERY_NEAR_LINE:
             return pt_coords
     return None
 
 def get_nearest_point_on_route_within_buf_basic(search_pt_geom, route_geom,
-        route_geom_within_range, seg_size=VERY_NEAR_LINE):
+        route_geom_within_range, seg_size):
     # Using the segmentise algorithm below is neither super-accurate
     # nor super-quick. But we're working with just a small section of
     # line, and we don't care about closest point to sub-meter precision,
@@ -244,8 +241,8 @@ def get_nearest_point_on_route_within_buf_basic(search_pt_geom, route_geom,
 
 def get_nearest_point_on_route_within_buf_fast(search_pt_geom, route_geom,
         route_geom_within_range):
-    near_coords = nearest_point_on_polyline_to_point(route_geom_within_range,
-        search_pt_geom.GetPoints()[0])
+    near_coords = lineargeom.nearest_point_on_polyline_to_point(
+        route_geom_within_range, search_pt_geom.GetPoints()[0])
     closest_point_geom = ogr.Geometry(ogr.wkbPoint)
     closest_point_geom.AddPoint(*near_coords)
     return closest_point_geom
@@ -317,21 +314,21 @@ def add_key_intersection_points_as_stops(isect_line, stops_lyr,
                 "%.1fm on this route and other route, so skipping." \
                     % min_dist_also_on_both_routes
             else:    
-                stop_id = add_stop(stops_lyr, stops_multipoint, TRANSFER_SELF_NAME,
-                    new_pt, src_srs)
+                stop_id = add_stop(stops_lyr, stops_multipoint,
+                    TRANSFER_SELF_NAME, new_pt, src_srs)
                 print "...and adding a stop here: B%d." % stop_id
                 # A final check. Need to make sure stops get placed 
                 # where _both_ bus lines will find them in segmenting
                 # algorithm later.
                 dist_self = new_pt.Distance(route_geom)
                 dist_other = new_pt.Distance(other_route_geom)    
-                assert (dist_self < DIST_FOR_MATCHING_STOPS_ON_ROUTES)
-                if (dist_other > DIST_FOR_MATCHING_STOPS_ON_ROUTES):
+                assert (dist_self < lineargeom.DIST_FOR_MATCHING_STOPS_ON_ROUTES)
+                if (dist_other > lineargeom.DIST_FOR_MATCHING_STOPS_ON_ROUTES):
                     # We need to add a stop to nearest point on other route-
                     # that will get picked up in segmenting algorithm.
                     print "...also adding a stop on other route, as dist "\
                         "%.1f is > %.1f" % (dist_other, \
-                        DIST_FOR_MATCHING_STOPS_ON_ROUTES)
+                        lineargeom.DIST_FOR_MATCHING_STOPS_ON_ROUTES)
                     new_pt_buffer = new_pt.Buffer(
                         BUFFER_DIST_SELF_ROUTE_TRANSFER*2)
                     other_route_in_range = other_route_geom.Intersection(
@@ -339,8 +336,8 @@ def add_key_intersection_points_as_stops(isect_line, stops_lyr,
                     new_pt_other = get_nearest_point_on_route_within_buf_fast(
                         new_pt, other_route_geom, other_route_in_range)
                     assert new_pt_other is not None
-                    stop_id = add_stop(stops_lyr, stops_multipoint, TRANSFER_SELF_NAME,
-                        new_pt_other, src_srs)
+                    stop_id = add_stop(stops_lyr, stops_multipoint,
+                        TRANSFER_SELF_NAME, new_pt_other, src_srs)
                     print "...Stop ID was B%d" % stop_id  
     return            
 
@@ -488,22 +485,84 @@ def add_other_network_transfer_stops(stops_lyr, input_routes_lyr,
         tfer_nw_stop_shp.Destroy()    
     return
 
+def add_filler_stops(stops_lyr, filler_dist, filler_stop_type, stops_multipoint):
+    print "\nAdding Filler stops at max dist %.1fm:" % filler_dist
+    for ii, route in enumerate(input_routes_lyr):
+        print "Adding Filler stops for route %s" % route.GetField(0)
+        route_geom = route.GetGeometryRef()
+        src_srs = route_geom.GetSpatialReference()
+        # First, get the stops of interest along route, we need to 'walk'
+        route_buffer = route_geom.Buffer(
+            lineargeom.DIST_FOR_MATCHING_STOPS_ON_ROUTES)
+        stops_near_route = stops_multipoint.Intersection(route_buffer)
+        rem_stop_is = range(stops_near_route.GetGeometryCount())
+        # Now walk the route, adding fillers when needed
+        start_coord = route_geom.GetPoint(0)
+        current_loc = start_coord
+        end_coord = route_geom.GetPoint(route_geom.GetPointCount()-1)
+        end_point = ogr.Geometry(ogr.wkbPoint)
+        end_point.AddPoint(*end_coord)
+
+        line_remains = True
+        stops_found = 0
+        last_stop_i_along_route = None
+        next_stop_i_along_route = None
+        while line_remains is True:
+            next_stop_on_route_isect, stop_ii, dist_to_next = \
+                lineargeom.get_next_stop_and_dist(route_geom, current_loc,
+                    stops_near_route, rem_stop_is)
+            if next_stop_on_route_isect is not None:
+                rem_stop_is.remove(stop_ii)
+                stops_found += 1
+                next_stop_i_along_route = stops_found-1
+            filler_incs = int(math.floor(dist_to_next / filler_dist))
+            if filler_incs > 0:
+                walk_dist_to_filler = dist_to_next / float(filler_incs+1)
+                print "..adding %03d filler stops between stops %02s and "\
+                    "%02s (route length %.1fm, filler dist %.1fm)" %\
+                    (filler_incs, last_stop_i_along_route, \
+                     next_stop_i_along_route, dist_to_next, \
+                     walk_dist_to_filler)
+                for ii in range(1, filler_incs+1):
+                    current_loc = lineargeom.move_dist_along_route(route_geom,
+                        current_loc, walk_dist_to_filler)
+                    filler_geom = ogr.Geometry(ogr.wkbPoint)
+                    filler_geom.AddPoint(*current_loc)
+                    print "..adding filler stop at %.1f, %.1f" %\
+                        (current_loc[0], current_loc[1])
+                    stop_id = add_stop(stops_lyr, stops_multipoint,
+                        filler_stop_type, filler_geom, src_srs)
+            # For safety, we're going to compute distance from end pt as
+            #  a stopping condition check as well.
+            curr_loc_pt = ogr.Geometry(ogr.wkbPoint)
+            curr_loc_pt.AddPoint(*current_loc)
+            dist_to_end = curr_loc_pt.Distance(end_point)
+            curr_loc_pt.Destroy()
+            if next_stop_on_route_isect is None or \
+                    dist_to_end < lineargeom.SAME_POINT:
+                # We've added fillers to the last section, so all done.
+                line_remains = False
+                break
+            # Walk ahead.
+            current_loc = next_stop_on_route_isect
+            last_stop_i_along_route = next_stop_i_along_route
+
 def create_stops(input_routes_lyr, stops_shp_file_name,
         transfer_networks):
     stops_shp_file, stops_lyr = create_stops_shp_file(stops_shp_file_name)
     # We'll use this multipoint for calculating distances more easily
     stops_multipoint = ogr.Geometry(ogr.wkbMultiPoint)
     add_route_start_end_stops(stops_lyr, input_routes_lyr, stops_multipoint)
-    add_self_transfer_stops(stops_lyr, input_routes_lyr, stops_multipoint)
-    add_other_network_transfer_stops(stops_lyr, input_routes_lyr,
-        transfer_networks_def, stops_multipoint)
-    #add_filler_stops(stops_shp_file, FILLER_MAX_DIST, FILLER_NAME)
+    #add_self_transfer_stops(stops_lyr, input_routes_lyr, stops_multipoint)
+    #add_other_network_transfer_stops(stops_lyr, input_routes_lyr,
+    #    transfer_networks_def, stops_multipoint)
+    add_filler_stops(stops_lyr, FILLER_MAX_DIST, FILLER_NAME, stops_multipoint)
     stops_shp_file.Destroy()
     return
 
 if __name__ == "__main__":
     input_routes_fname = './network_topology_testing/network-self-snapped-reworked-patextend-201405.shp'
-    stops_shp_file_name = './network_topology_testing/network-self-snapped-reworked-patextend-201405-stops-tight-route-test-2-with_trams-180-min-dist.shp'
+    stops_shp_file_name = './network_topology_testing/network-self-snapped-reworked-patextend-201405-stops-tight-route-test-2-fillers.shp'
     segments_shp_file_name = './network_topology_testing/network-self-snapped-reworked-patextend-201405-segments.shp'
     fname = os.path.expanduser(input_routes_fname)
     input_routes_shp = osgeo.ogr.Open(fname, 0)
@@ -516,7 +575,7 @@ if __name__ == "__main__":
     transfer_networks_test = [
         ['./network_topology_testing/train_stop.shp', 350, 50, "TRANSFER_TRAIN"],
         # ['motorway_bus_stops.shp', 350m, 50m, "TRANSFER_MWAY_BUS"],
-        ['./network_topology_testing/tram_stop.shp', 300, 180, "TRANSFER_TRAM"],
+        #['./network_topology_testing/tram_stop.shp', 300, 180, "TRANSFER_TRAM"],
         ]
 
     transfer_networks_def = []
