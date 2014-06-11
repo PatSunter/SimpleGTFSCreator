@@ -15,7 +15,7 @@ ROUTE_NAME_FIELD = "NAME"
 EPSG_SEGS_FILE = 4326
 SEG_LYR_NAME = "segments"
 SEG_ID_FIELD = "id"                 # str, 21
-SEG_ROUTE_LIST_FIELD = "route_list" # str, 255
+SEG_ROUTE_LIST_FIELD = "route_list" # str, 254
 SEG_STOP_1_NAME_FIELD = "pt_a"      # str, 24
 SEG_STOP_2_NAME_FIELD = "pt_b"      # str, 24
 SEG_ROUTE_DIST_FIELD = 'leg_length' # real, 24, 15
@@ -110,12 +110,12 @@ def create_segs_shp_file(segs_shp_file_name, delete_existing=False):
         sys.exit(1)
     srs = osr.SpatialReference()
     srs.ImportFromEPSG(EPSG_SEGS_FILE)
-    layer = segs_shp_file.CreateLayer(SEG_LYR_NAME, srs, ogr.wkbPoint)
+    layer = segs_shp_file.CreateLayer(SEG_LYR_NAME, srs, ogr.wkbLineString)
     field = ogr.FieldDefn(SEG_ID_FIELD, ogr.OFTString)
     field.SetWidth(21)
     layer.CreateField(field)
     field = ogr.FieldDefn(SEG_ROUTE_LIST_FIELD, ogr.OFTString)
-    field.SetWidth(255)
+    field.SetWidth(254)
     layer.CreateField(field)
     field = ogr.FieldDefn(SEG_STOP_1_NAME_FIELD, ogr.OFTString)
     field.SetWidth(24)
@@ -140,30 +140,40 @@ def create_segs_shp_file(segs_shp_file_name, delete_existing=False):
     return segs_shp_file, layer
 
 def add_new_segment(segs_lyr, start_stop_id, end_stop_id, route_name,
-        dist_to_next):
-    seg_id = segments_lyr.GetFeatureCount()
+        route_dist_on_seg, seg_geom):
+    seg_id = segs_lyr.GetFeatureCount()+1
     #Create seg feature, with needed fields etc.
     seg_feat = ogr.Feature(segs_lyr.GetLayerDefn())
     #Need to re-project geometry into target SRS (do this now,
     # after we've added to multipoint, which should be in same SRS as
     # above).
+    assert(seg_geom.GetPointCount() == 2)
+    src_srs = seg_geom.GetSpatialReference()
     target_srs = segs_lyr.GetSpatialRef()
-    seg_geom = ogr.Geometry(ogr.wkbLineString)
-    seg_geom.AddPoint(start_pt)
-    seg_geom.AddPoint(end_pt)
-    seg_feat.SetGeometry(seg_geom)
+    assert(src_srs != None)
+    assert(target_srs != None)
+    transform = osr.CoordinateTransformation(src_srs, target_srs)
+    seg_geom2 = seg_geom.Clone()
+    seg_geom2.Transform(transform)
+    seg_feat.SetGeometry(seg_geom2)
     seg_feat.SetField(SEG_ID_FIELD, seg_id)
-    seg_feat.SetField(STOP_NAME_FIELD, pt_id)
-    seg_feat.SetField(STOP_TYPE_FIELD, seg_type)
+    seg_feat.SetField(SEG_ROUTE_LIST_FIELD, route_name)
+    seg_feat.SetField(SEG_STOP_1_NAME_FIELD, "B%d" % start_stop_id)
+    seg_feat.SetField(SEG_STOP_2_NAME_FIELD, "B%d" % end_stop_id)
+    # Rounding to nearest meter below per convention.
+    seg_feat.SetField(SEG_ROUTE_DIST_FIELD, "%.0f" % route_dist_on_seg)
+    seg_feat.SetField(SEG_FREE_SPEED_FIELD, 0.0)
+    seg_feat.SetField(SEG_PEAK_SPEED_FIELD, 0.0)
     segs_lyr.CreateFeature(seg_feat)
     seg_feat.Destroy()
-    return pt_id
+    seg_geom2.Destroy()
     return seg_id
 
-def add_update_segment(segments_lyr, stops_lyr, start_stop_id,
-        end_stop_id, route_name, dist_to_next):
+def add_update_segment(segments_lyr, start_stop_id,
+        end_stop_id, route_name, route_dist_on_seg, seg_geom):
     seg_id = None
     new_status = False
+    # TODO:- implement this check below!
     # Search for segment in existing list
     # If found
         # new_status = False
@@ -172,4 +182,6 @@ def add_update_segment(segments_lyr, stops_lyr, start_stop_id,
     # If not found
         # new_status = True
         # Create a new segment, with just this route.
+    add_new_segment(segments_lyr, start_stop_id, end_stop_id, route_name,
+        route_dist_on_seg, seg_geom)
     return seg_id, new_status
