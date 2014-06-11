@@ -381,7 +381,7 @@ def add_nearest_point_on_route_as_stop(route_sec_within_range, stops_lyr,
     # Check results of above, to be sure
     assert closest_point_geom is not None        
     dist_to_route = closest_point_geom.Distance(route_sec_within_range)
-    assert dist_to_route < VERY_NEAR_LINE
+    assert dist_to_route < lineargeom.VERY_NEAR_LINE
     print "...found closest point at %.2f, %.2f" % \
         closest_point_geom.GetPoints()[0][:2]
 
@@ -528,8 +528,8 @@ def add_filler_stops(stops_lyr, filler_dist, filler_stop_type, stops_multipoint)
                         current_loc, walk_dist_to_filler)
                     filler_geom = ogr.Geometry(ogr.wkbPoint)
                     filler_geom.AddPoint(*current_loc)
-                    print "..adding filler stop at %.1f, %.1f" %\
-                        (current_loc[0], current_loc[1])
+                    #print "..adding filler stop at %.1f, %.1f" %\
+                    #    (current_loc[0], current_loc[1])
                     stop_id = add_stop(stops_lyr, stops_multipoint,
                         filler_stop_type, filler_geom, src_srs)
             # For safety, we're going to compute distance from end pt as
@@ -553,16 +553,16 @@ def create_stops(input_routes_lyr, stops_shp_file_name,
     # We'll use this multipoint for calculating distances more easily
     stops_multipoint = ogr.Geometry(ogr.wkbMultiPoint)
     add_route_start_end_stops(stops_lyr, input_routes_lyr, stops_multipoint)
-    #add_self_transfer_stops(stops_lyr, input_routes_lyr, stops_multipoint)
-    #add_other_network_transfer_stops(stops_lyr, input_routes_lyr,
-    #    transfer_networks_def, stops_multipoint)
+    add_self_transfer_stops(stops_lyr, input_routes_lyr, stops_multipoint)
+    add_other_network_transfer_stops(stops_lyr, input_routes_lyr,
+        transfer_networks_def, stops_multipoint)
     add_filler_stops(stops_lyr, FILLER_MAX_DIST, FILLER_NAME, stops_multipoint)
     stops_shp_file.Destroy()
     return
 
 if __name__ == "__main__":
     input_routes_fname = './network_topology_testing/network-self-snapped-reworked-patextend-201405.shp'
-    stops_shp_file_name = './network_topology_testing/network-self-snapped-reworked-patextend-201405-stops-tight-route-test-2-fillers.shp'
+    stops_shp_file_name = './network_topology_testing/network-self-snapped-reworked-patextend-201405-stops-inc-fillers.shp'
     segments_shp_file_name = './network_topology_testing/network-self-snapped-reworked-patextend-201405-segments.shp'
     fname = os.path.expanduser(input_routes_fname)
     input_routes_shp = osgeo.ogr.Open(fname, 0)
@@ -575,7 +575,7 @@ if __name__ == "__main__":
     transfer_networks_test = [
         ['./network_topology_testing/train_stop.shp', 350, 50, "TRANSFER_TRAIN"],
         # ['motorway_bus_stops.shp', 350m, 50m, "TRANSFER_MWAY_BUS"],
-        #['./network_topology_testing/tram_stop.shp', 300, 180, "TRANSFER_TRAM"],
+        ['./network_topology_testing/tram_stop.shp', 300, 180, "TRANSFER_TRAM"],
         ]
 
     transfer_networks_def = []
