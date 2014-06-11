@@ -431,12 +431,14 @@ def add_other_network_transfer_stops(stops_lyr, input_routes_lyr,
         tfer_nw_stop_shp.Destroy()    
     return
 
-def add_filler_stops(stops_lyr, filler_dist, filler_stop_type, stops_multipoint):
+def add_filler_stops(stops_lyr, filler_dist, input_routes_lyr,
+        filler_stop_type, stops_multipoint):
+
+    src_srs = input_routes_lyr.GetSpatialRef()
     print "\nAdding Filler stops at max dist %.1fm:" % filler_dist
     for ii, route in enumerate(input_routes_lyr):
         print "Adding Filler stops for route %s" % route.GetField(0)
         route_geom = route.GetGeometryRef()
-        src_srs = route_geom.GetSpatialReference()
         # First, get the stops of interest along route, we need to 'walk'
         route_buffer = route_geom.Buffer(
             lineargeom.DIST_FOR_MATCHING_STOPS_ON_ROUTES)
@@ -446,8 +448,8 @@ def add_filler_stops(stops_lyr, filler_dist, filler_stop_type, stops_multipoint)
         start_coord = route_geom.GetPoint(0)
         current_loc = start_coord
         end_coord = route_geom.GetPoint(route_geom.GetPointCount()-1)
-        end_point = ogr.Geometry(ogr.wkbPoint)
-        end_point.AddPoint(*end_coord)
+        end_vertex = ogr.Geometry(ogr.wkbPoint)
+        end_vertex.AddPoint(*end_coord)
 
         line_remains = True
         stops_found = 0
@@ -485,13 +487,18 @@ def add_filler_stops(stops_lyr, filler_dist, filler_stop_type, stops_multipoint)
             #  a stopping condition check as well.
             curr_loc_pt = ogr.Geometry(ogr.wkbPoint)
             curr_loc_pt.AddPoint(*current_loc)
-            dist_to_end = curr_loc_pt.Distance(end_point)
+            dist_to_end = curr_loc_pt.Distance(end_vertex)
             curr_loc_pt.Destroy()
             if next_stop_on_route_isect is None or \
                     dist_to_end < lineargeom.SAME_POINT:
                 # We've added fillers to the last section, so all done.
                 line_remains = False
                 break
+        route_buffer.Destroy()
+        stops_near_route.Destroy()
+        end_vertex.Destroy()
+    input_routes_lyr.ResetReading()
+    return
 
 def create_stops(input_routes_lyr, stops_shp_file_name,
         transfer_networks):
@@ -503,10 +510,162 @@ def create_stops(input_routes_lyr, stops_shp_file_name,
     add_self_transfer_stops(stops_lyr, input_routes_lyr, stops_multipoint)
     add_other_network_transfer_stops(stops_lyr, input_routes_lyr,
         transfer_networks_def, stops_multipoint)
-    add_filler_stops(stops_lyr, FILLER_MAX_DIST, FILLER_NAME, stops_multipoint)
+    add_filler_stops(stops_lyr, input_routes_lyr, FILLER_MAX_DIST,
+        FILLER_NAME, stops_multipoint)
     stops_shp_file.Destroy()
     return
 
+def build_multipoint_from_lyr(stops_lyr):
+    stops_multipoint = ogr.Geometry(ogr.wkbMultiPoint)
+    stops_multipoint.AssignSpatialReference(stops_lyr.GetSpatialRef())
+    # Importantly, this will respect filters.
+    for stop in stops_lyr:
+        stop_geom = stop.GetGeometryRef()
+        stops_multipoint.AddGeometry(stop_geom)
+    stops_lyr.ResetReading()    
+    return stops_multipoint
+
+def reproject_all_multipoint(multipoint, new_srs):
+    mpoint_srs = multipoint.GetSpatialReference()
+    transform = osr.CoordinateTransformation(mpoint_srs, new_srs)
+    for pt_geom in multipoint:
+        pt_geom.Transform(transform)
+    return
+
+def get_multipoint_within_with_map(multipoint, test_geom):
+    """Get a new multipoint, which is the set of points from input
+    multipoint, that are within test_geom. Also return an 'intersection
+    map' from indices in the returned new mpoint_within, back to
+    corresponding point id within original."""
+    xmin, xmax, ymin, ymax = test_geom.GetEnvelope()
+    mpoint_within = ogr.Geometry(ogr.wkbMultiPoint)
+    isect_map = []
+    test_geom_srs = test_geom.GetSpatialReference()
+    for pt_i, pt_geom in enumerate(multipoint):
+        ptx, pty = pt_geom.GetPoint_2D(0)
+        # Hand-roll a bbox check to speed up before more expensive Within
+        # check.
+        if ptx >= xmin and ptx <= xmax \
+                and pty >= ymin and pty <= ymax \
+                and pt_geom.Within(test_geom):
+            mpoint_within.AddGeometry(pt_geom)
+            isect_map.append(pt_i)
+    return mpoint_within, isect_map
+
+def create_segments(input_routes_lyr, input_stops_lyr, segs_shp_file_name):
+    """Creates all the route segments, from a given set of stops.
+    
+    Note: See comments re projections below, it gets a bit tricky in this one."""
+    
+    segs_shp_file, segments_lyr = tp_model.create_segs_shp_file(
+        segs_shp_file_name, delete_existing=DELETE_EXISTING)
+
+    routes_srs = input_routes_lyr.GetSpatialRef()
+    stops_srs = input_stops_lyr.GetSpatialRef()
+
+    # First, get a multipoint in right projection.
+    stops_multipoint = build_multipoint_from_lyr(input_stops_lyr)
+    reproject_all_multipoint(stops_multipoint, routes_srs)
+
+    print "Creating Route segments"
+    for ii, route in enumerate(input_routes_lyr):
+        rname = route.GetField(0)
+        start_cnt = segments_lyr.GetFeatureCount()
+        print "Creating route segments for route %s" % rname
+        # Get the stops of interest along route, we need to 'walk'
+        route_geom = route.GetGeometryRef()
+        route_buffer = route_geom.Buffer(
+            lineargeom.DIST_FOR_MATCHING_STOPS_ON_ROUTES)
+        stops_near_route, isect_map = get_multipoint_within_with_map(
+            stops_multipoint, route_buffer)
+        if stops_near_route.GetGeometryCount() == 0:
+            print "Error, no stops detected near route %s while creating "\
+                "segments." % rname
+            sys.exit()    
+        rem_stop_is = range(stops_near_route.GetGeometryCount())
+        start_coord = route_geom.GetPoint(0)
+        current_loc = start_coord
+        end_coord = route_geom.GetPoint(route_geom.GetPointCount()-1)
+        end_vertex = ogr.Geometry(ogr.wkbPoint)
+        end_vertex.AddPoint(*end_coord)
+        line_remains = True
+        stops_found = 0
+        last_stop_i_along_route = None
+        last_stop_i_in_route_set = None
+        next_stop_i_along_route = None
+        next_stop_i_in_route_set = None
+        while line_remains is True:
+            next_stop_on_route_isect, stop_ii, dist_to_next = \
+                lineargeom.get_next_stop_and_dist(route_geom, current_loc,
+                    stops_near_route, rem_stop_is)
+            if next_stop_on_route_isect is None:
+                # No more stops detected - Finish.
+                break
+
+            rem_stop_is.remove(stop_ii)
+            stops_found += 1
+            next_stop_i_along_route = stops_found-1
+            next_stop_i_in_route_set = stop_ii
+
+            if last_stop_i_along_route is not None:
+                last_stop_i = isect_map[last_stop_i_in_route_set]
+                last_stop = input_stops_lyr.GetFeature(last_stop_i)
+                last_stop_id = last_stop.GetField(tp_model.STOP_ID_FIELD)
+                next_stop_i = isect_map[next_stop_i_in_route_set]
+                next_stop = input_stops_lyr.GetFeature(next_stop_i)
+                next_stop_id = next_stop.GetField(tp_model.STOP_ID_FIELD)
+                #print "..adding seg b/w stops %02s (id %d) and "\
+                #    "%02s (id %d) (linear length %.1fm)" %\
+                #        (last_stop_i_along_route, last_stop_id,\
+                #         next_stop_i_along_route, next_stop_id,\
+                #         dist_to_next)
+                seg_geom = ogr.Geometry(ogr.wkbLineString)
+                # Add the geoms from the orig stops layer - as likely this
+                # is the same as that desired for segs layer
+                seg_geom.AssignSpatialReference(stops_srs)
+                seg_geom.AddPoint(*last_stop.GetGeometryRef().GetPoint(0))
+                seg_geom.AddPoint(*next_stop.GetGeometryRef().GetPoint(0))
+                seg_id = tp_model.add_update_segment(segments_lyr, 
+                    last_stop_id, next_stop_id, rname, dist_to_next, seg_geom)
+                last_stop.Destroy()
+                next_stop.Destroy()
+                seg_geom.Destroy()    
+            else:
+                if dist_to_next > lineargeom.DIST_FOR_MATCHING_STOPS_ON_ROUTES:
+                    print "Warning: for route %s, first stop is %.1fm from "\
+                        "start of route (>%.1fm)." % \
+                        (rname, dist_to_next, \
+                        lineargeom.DIST_FOR_MATCHING_STOPS_ON_ROUTES)
+            # Walk ahead.
+            current_loc = next_stop_on_route_isect
+            last_stop_i_along_route = next_stop_i_along_route
+            last_stop_i_in_route_set = next_stop_i_in_route_set
+            # For safety, we're going to compute distance from end pt as
+            #  a stopping condition check as well.
+            curr_loc_pt = ogr.Geometry(ogr.wkbPoint)
+            curr_loc_pt.AddPoint(*current_loc)
+            dist_to_end = curr_loc_pt.Distance(end_vertex)
+            curr_loc_pt.Destroy()
+            if next_stop_on_route_isect is None or \
+                    dist_to_end < lineargeom.SAME_POINT:
+                # We've added all segments
+                line_remains = False
+                break
+        end_cnt = segments_lyr.GetFeatureCount()
+        print "..Added %d new segs in total for this route." % \
+            (end_cnt - start_cnt)
+        route_buffer.Destroy()
+        stops_near_route.Destroy()
+        end_vertex.Destroy()
+    total_segs = segments_lyr.GetFeatureCount()
+    nroutes = input_routes_lyr.GetFeatureCount()
+    mean_segs_per_route = total_segs / float(nroutes)
+    print "\nAdded %d new segs in total for the %d routes (av. %.1f "\
+        "segs/route)." % (total_segs, nroutes, mean_segs_per_route)
+    input_routes_lyr.ResetReading()
+    # Force a write.
+    segs_shp_file.Destroy()
+    return
 
 if __name__ == "__main__":
     input_routes_fname = './network_topology_testing/network-self-snapped-reworked-patextend-201405.shp'
@@ -532,16 +691,17 @@ if __name__ == "__main__":
             nw_def_entry[2], nw_def_entry[3])
         transfer_networks_def.append(tf_nw_def)    
 
-    create_stops(input_routes_lyr, stops_shp_file_name,
-        transfer_networks_def)
+    #create_stops(input_routes_lyr, stops_shp_file_name,
+    #    transfer_networks_def)
 
-    stops_shp = osgeo.ogr.Open(stops_shp_file_name, 0)
+    fname = os.path.expanduser(stops_shp_file_name)
+    stops_shp = osgeo.ogr.Open(fname, 0)
     if stops_shp is None:
         print "Error, newly created stops shape file, %s , failed to open." \
             % (stops_shp_file_name)
         sys.exit(1)
-    #stops_lyr = stops_shp.GetLayer(0)   
-    #create_segments(input_routes_lyr, stops_lyr,
-    #    segments_shp_file_name)
+    stops_lyr = stops_shp.GetLayer(0)   
+    create_segments(input_routes_lyr, stops_lyr,
+        segments_shp_file_name)
     input_routes_shp.Destroy()
     stops_shp.Destroy()    
