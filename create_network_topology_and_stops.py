@@ -29,69 +29,20 @@ class TransferNetworkDef:
         self.stop_min_dist = stop_min_dist
         self.stop_typ_name = stop_typ_name
 
-EPSG_STOPS_FILE = 4326
 DELETE_EXISTING = True
 
 ROUTE_START_END_NAME = "ROUTE_START_END"
 TRANSFER_SELF_NAME = "TRANSFER_SELF"
 FILLER_NAME = "FILLERS"
 
+# TODO: make this a tune-able parameter from the command-line.
+# Then can save scripts used to generate particular networks and
+#  timetables later.
 FILLER_MAX_DIST = 500
 
 BUFFER_DIST_SELF_ROUTE_TRANSFER = 30.0
 CROSSING_ANGLE_FACTOR = 0.01
 MIN_DIST_TO_PLACE_ISECT_STOPS = 80.0
-
-def create_stops_shp_file(stops_shp_file_name):
-    # OGR doesn't like relative paths
-    abs_stops_shp_file_name = os.path.abspath(stops_shp_file_name)
-    print "Creating new stops shape file at path %s:" % abs_stops_shp_file_name
-    if os.path.exists(abs_stops_shp_file_name):
-        print "File exists at that name."
-        if DELETE_EXISTING == True:
-            print "deleting so we can overwrite."
-            os.unlink(abs_stops_shp_file_name)
-        else:
-            print "... so exiting."
-            sys.exit(1)
-    driver = ogr.GetDriverByName("ESRI Shapefile")
-    stops_shp_file = driver.CreateDataSource(abs_stops_shp_file_name)
-    if stops_shp_file is None:
-        print "Error trying to create new shapefile at path %s - exiting." %\
-            abs_stops_shp_file_name
-        sys.exit(1)
-    srs = osr.SpatialReference()
-    srs.ImportFromEPSG(EPSG_STOPS_FILE)
-    layer = stops_shp_file.CreateLayer("stops", srs, ogr.wkbPoint)
-    layer.CreateField(ogr.FieldDefn("gid", ogr.OFTInteger))
-    layer.CreateField(ogr.FieldDefn("id", ogr.OFTInteger))
-    field = ogr.FieldDefn("typ", ogr.OFTString)
-    field.SetWidth(24)
-    layer.CreateField(field)
-    print "... done."
-    return stops_shp_file, layer
-
-def add_stop(stops_lyr, stops_multipoint, stop_type, stop_geom, src_srs):
-    pt_id = stops_multipoint.GetGeometryCount()
-    stops_multipoint.AddGeometry(stop_geom)
-    #Create stop point, with needed fields etc.
-    stop_feat = ogr.Feature(stops_lyr.GetLayerDefn())
-    #Need to re-project geometry into target SRS (do this now,
-    # after we've added to multipoint, which should be in same SRS as
-    # above).
-    target_srs = stops_lyr.GetSpatialRef()
-    assert(src_srs != None)
-    assert(target_srs != None)
-    transform = osr.CoordinateTransformation(src_srs, target_srs)
-    stop_geom2 = stop_geom.Clone()
-    stop_geom2.Transform(transform)
-    stop_feat.SetGeometry(stop_geom2)
-    stop_feat.SetField("gid", pt_id)
-    stop_feat.SetField("id", pt_id)
-    stop_feat.SetField("typ", stop_type)
-    stops_lyr.CreateFeature(stop_feat)
-    stop_feat.Destroy()
-    return pt_id
 
 def get_min_dist_from_existing_stops(pt_geom, stops_multipoint):
     if stops_multipoint.GetGeometryCount() >= 1:
@@ -183,8 +134,8 @@ def add_route_start_end_stops(stops_lyr, input_routes_lyr, stops_multipoint):
                 #    "there is a stop here already."
                 pass
             else:
-                stop_id = add_stop(stops_lyr, stops_multipoint, ROUTE_START_END_NAME,
-                    pt, src_srs)
+                stop_id = tp_model.add_stop(stops_lyr, stops_multipoint,
+                    ROUTE_START_END_NAME, pt, src_srs)
                 #print "...Adding stop at route start/end"
     input_routes_lyr.ResetReading()
 
@@ -314,7 +265,7 @@ def add_key_intersection_points_as_stops(isect_line, stops_lyr,
                 "%.1fm on this route and other route, so skipping." \
                     % min_dist_also_on_both_routes
             else:    
-                stop_id = add_stop(stops_lyr, stops_multipoint,
+                stop_id = tp_model.add_stop(stops_lyr, stops_multipoint,
                     TRANSFER_SELF_NAME, new_pt, src_srs)
                 print "...and adding a stop here: B%d." % stop_id
                 # A final check. Need to make sure stops get placed 
@@ -336,7 +287,7 @@ def add_key_intersection_points_as_stops(isect_line, stops_lyr,
                     new_pt_other = get_nearest_point_on_route_within_buf_fast(
                         new_pt, other_route_geom, other_route_in_range)
                     assert new_pt_other is not None
-                    stop_id = add_stop(stops_lyr, stops_multipoint,
+                    stop_id = tp_model.add_stop(stops_lyr, stops_multipoint,
                         TRANSFER_SELF_NAME, new_pt_other, src_srs)
                     print "...Stop ID was B%d" % stop_id  
     return            
@@ -348,9 +299,6 @@ def add_self_transfer_stops(stops_lyr, input_routes_lyr, stops_multipoint):
             other_route = input_routes_lyr.GetFeature(jj)
             print "Testing for intersection pts on routes '%s' and '%s' "\
                 % (route.GetField(0), other_route.GetField(0))
-            #if route.GetField(0) == "R16" and other_route.GetField(0) == "R76":
-            #    import pdb
-            #    pdb.set_trace()
             # Put a buffer around 2nd route before we do the intersect
             # (to deal with fact routes were manually drawn into GIS,
             # may not actually be co-incident even though nominally 
@@ -384,7 +332,6 @@ def add_nearest_point_on_route_as_stop(route_sec_within_range, stops_lyr,
     assert dist_to_route < lineargeom.VERY_NEAR_LINE
     print "...found closest point at %.2f, %.2f" % \
         closest_point_geom.GetPoints()[0][:2]
-
     # Now, need to check if there are other stops already added on this
     # line, within min dist to place stops.
     min_dist_also_on_route = get_stops_already_on_route_within_dist(
@@ -399,7 +346,7 @@ def add_nearest_point_on_route_as_stop(route_sec_within_range, stops_lyr,
             min_dist_also_on_line    
 
     if min_dist_also_on_line >= stop_min_dist:
-        stop_id = add_stop(stops_lyr, stops_multipoint, stop_typ_name,
+        stop_id = tp_model.add_stop(stops_lyr, stops_multipoint, stop_typ_name,
             closest_point_geom, route_geom_srs)
         print "...added stop B%d." % stop_id
     else:
@@ -437,8 +384,9 @@ def add_other_network_transfer_stops(stops_lyr, input_routes_lyr,
                 route_geom = route.GetGeometryRef()
                 route_sec_within_range = route_geom.Intersection(
                     other_s_buf)
-                if other_stop.GetField("Name") == "HELL Port Junction/79 Whiteman St"\
-                        and route.GetField(0) == "R61":
+                if other_stop.GetField("Name") == "HELL!"\
+                        and route.GetField(0) == "R1":
+                    # NB: this clause purely for debugging currently.    
                     driver = ogr.GetDriverByName("ESRI Shapefile")
                     if os.path.exists("segs.shp"):
                         os.unlink("segs.shp")
@@ -447,7 +395,7 @@ def add_other_network_transfer_stops(stops_lyr, input_routes_lyr,
                         input_routes_lyr.GetSpatialRef(),
                         ogr.wkbLineString)
                     field = ogr.FieldDefn("station", ogr.OFTString)
-                    field.SetWidth(60)
+                    field.SetWidth(256)
                     layer.CreateField(field)
                     field = ogr.FieldDefn("route", ogr.OFTString)
                     field.SetWidth(24)
@@ -459,8 +407,6 @@ def add_other_network_transfer_stops(stops_lyr, input_routes_lyr,
                     feat.SetField("route", route.GetField(0))
                     layer.CreateFeature(feat)
                     feat.Destroy()
-                    import pdb
-                    pdb.set_trace()
 
                 if route_sec_within_range.GetGeometryCount() == 0 \
                         and route_sec_within_range.GetPointCount() > 0:
@@ -530,8 +476,11 @@ def add_filler_stops(stops_lyr, filler_dist, filler_stop_type, stops_multipoint)
                     filler_geom.AddPoint(*current_loc)
                     #print "..adding filler stop at %.1f, %.1f" %\
                     #    (current_loc[0], current_loc[1])
-                    stop_id = add_stop(stops_lyr, stops_multipoint,
+                    stop_id = tp_model.add_stop(stops_lyr, stops_multipoint,
                         filler_stop_type, filler_geom, src_srs)
+            # Walk ahead.
+            current_loc = next_stop_on_route_isect
+            last_stop_i_along_route = next_stop_i_along_route
             # For safety, we're going to compute distance from end pt as
             #  a stopping condition check as well.
             curr_loc_pt = ogr.Geometry(ogr.wkbPoint)
@@ -543,13 +492,11 @@ def add_filler_stops(stops_lyr, filler_dist, filler_stop_type, stops_multipoint)
                 # We've added fillers to the last section, so all done.
                 line_remains = False
                 break
-            # Walk ahead.
-            current_loc = next_stop_on_route_isect
-            last_stop_i_along_route = next_stop_i_along_route
 
 def create_stops(input_routes_lyr, stops_shp_file_name,
         transfer_networks):
-    stops_shp_file, stops_lyr = create_stops_shp_file(stops_shp_file_name)
+    stops_shp_file, stops_lyr = tp_model.create_stops_shp_file(
+        stops_shp_file_name, delete_existing=DELETE_EXISTING)
     # We'll use this multipoint for calculating distances more easily
     stops_multipoint = ogr.Geometry(ogr.wkbMultiPoint)
     add_route_start_end_stops(stops_lyr, input_routes_lyr, stops_multipoint)
@@ -560,9 +507,10 @@ def create_stops(input_routes_lyr, stops_shp_file_name,
     stops_shp_file.Destroy()
     return
 
+
 if __name__ == "__main__":
     input_routes_fname = './network_topology_testing/network-self-snapped-reworked-patextend-201405.shp'
-    stops_shp_file_name = './network_topology_testing/network-self-snapped-reworked-patextend-201405-stops-inc-fillers.shp'
+    stops_shp_file_name = './network_topology_testing/network-self-snapped-reworked-patextend-201405-stops-inc-fillers-2.shp'
     segments_shp_file_name = './network_topology_testing/network-self-snapped-reworked-patextend-201405-segments.shp'
     fname = os.path.expanduser(input_routes_fname)
     input_routes_shp = osgeo.ogr.Open(fname, 0)
