@@ -141,7 +141,8 @@ def create_segs_shp_file(segs_shp_file_name, delete_existing=False):
 
 def add_new_segment(segs_lyr, start_stop_id, end_stop_id, route_name,
         route_dist_on_seg, seg_geom):
-    seg_id = segs_lyr.GetFeatureCount()+1
+    seg_ii = segs_lyr.GetFeatureCount()
+    seg_id = seg_ii + 1                 # Start from 1.
     #Create seg feature, with needed fields etc.
     seg_feat = ogr.Feature(segs_lyr.GetLayerDefn())
     #Need to re-project geometry into target SRS (do this now,
@@ -167,21 +168,43 @@ def add_new_segment(segs_lyr, start_stop_id, end_stop_id, route_name,
     segs_lyr.CreateFeature(seg_feat)
     seg_feat.Destroy()
     seg_geom2.Destroy()
-    return seg_id
+    return seg_ii, seg_id
+
+def add_route_to_seg(segments_lyr, seg_feat, route_name):
+    orig_list = seg_feat.GetField(SEG_ROUTE_LIST_FIELD)
+    upd_list = orig_list + ",%s" % route_name
+    seg_feat.SetField(SEG_ROUTE_LIST_FIELD, upd_list)
+    segments_lyr.SetFeature(seg_feat)
+    return
 
 def add_update_segment(segments_lyr, start_stop_id,
-        end_stop_id, route_name, route_dist_on_seg, seg_geom):
+        end_stop_id, route_name, route_dist_on_seg, seg_geom,
+        all_seg_tuples):
     seg_id = None
     new_status = False
-    # TODO:- implement this check below!
-    # Search for segment in existing list
-    # If found
-        # new_status = False
-        # Check if current route in route list
-        # If not, add it (in sorted order?)
-    # If not found
-        # new_status = True
-        # Create a new segment, with just this route.
-    add_new_segment(segments_lyr, start_stop_id, end_stop_id, route_name,
-        route_dist_on_seg, seg_geom)
-    return seg_id, new_status
+    # First, search for existing segment in list
+    # TODO:- search in all_seg_tuples for tuple with right attribs
+    matched_seg = None
+    matched_seg_tuple = None
+    for seg_tuple in all_seg_tuples:
+        if seg_tuple[1] == start_stop_id and seg_tuple[2] == end_stop_id or \
+                seg_tuple[1] == end_stop_id and seg_tuple[2] == start_stop_id:
+            matched_seg_tuple = seg_tuple
+            matched_seg = segments_lyr.GetFeature(matched_seg_tuple[0])
+            break
+    if matched_seg:
+        #print "While adding, matched a segment! Seg id = %s, existing "\
+        #    "routes = '%s', new route = '%s'" %\
+        #    (matched_seg.GetField(SEG_ID_FIELD),\
+        #    matched_seg.GetField(SEG_ROUTE_LIST_FIELD),\
+        #    route_name)
+        add_route_to_seg(segments_lyr, matched_seg, route_name)
+        new_status = False
+        seg_ii = matched_seg_tuple[0]
+        seg_id = matched_seg.GetField(SEG_ID_FIELD)
+    else:    
+
+        seg_ii, seg_id = add_new_segment(segments_lyr, start_stop_id, end_stop_id,
+            route_name, route_dist_on_seg, seg_geom)
+        new_status = True
+    return seg_ii, seg_id, new_status

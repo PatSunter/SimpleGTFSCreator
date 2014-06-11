@@ -559,7 +559,8 @@ def create_segments(input_routes_lyr, input_stops_lyr, segs_shp_file_name):
     
     segs_shp_file, segments_lyr = tp_model.create_segs_shp_file(
         segs_shp_file_name, delete_existing=DELETE_EXISTING)
-
+    all_seg_tuples = []
+    route_seg_tuples = []
     routes_srs = input_routes_lyr.GetSpatialRef()
     stops_srs = input_stops_lyr.GetSpatialRef()
 
@@ -570,6 +571,8 @@ def create_segments(input_routes_lyr, input_stops_lyr, segs_shp_file_name):
     print "Creating Route segments"
     for ii, route in enumerate(input_routes_lyr):
         rname = route.GetField(0)
+        route_seg_tuples.append((rname,[]))
+        #if rname not in ['R103', 'R104', 'R105', 'R110']: continue
         start_cnt = segments_lyr.GetFeatureCount()
         print "Creating route segments for route %s" % rname
         # Get the stops of interest along route, we need to 'walk'
@@ -625,8 +628,13 @@ def create_segments(input_routes_lyr, input_stops_lyr, segs_shp_file_name):
                 seg_geom.AssignSpatialReference(stops_srs)
                 seg_geom.AddPoint(*last_stop.GetGeometryRef().GetPoint(0))
                 seg_geom.AddPoint(*next_stop.GetGeometryRef().GetPoint(0))
-                seg_id = tp_model.add_update_segment(segments_lyr, 
-                    last_stop_id, next_stop_id, rname, dist_to_next, seg_geom)
+                seg_ii, seg_id, new_status = tp_model.add_update_segment(
+                    segments_lyr, last_stop_id, next_stop_id, rname,
+                    dist_to_next, seg_geom, all_seg_tuples)
+                new_seg_tuple = (seg_ii, last_stop_id, next_stop_id)
+                if new_status == True:
+                    all_seg_tuples.append(new_seg_tuple)
+                route_seg_tuples[-1][1].append(new_seg_tuple)
                 last_stop.Destroy()
                 next_stop.Destroy()
                 seg_geom.Destroy()    
@@ -670,7 +678,7 @@ def create_segments(input_routes_lyr, input_stops_lyr, segs_shp_file_name):
 if __name__ == "__main__":
     input_routes_fname = './network_topology_testing/network-self-snapped-reworked-patextend-201405.shp'
     stops_shp_file_name = './network_topology_testing/network-self-snapped-reworked-patextend-201405-stops-inc-fillers-2.shp'
-    segments_shp_file_name = './network_topology_testing/network-self-snapped-reworked-patextend-201405-segments.shp'
+    segments_shp_file_name = './network_topology_testing/network-self-snapped-reworked-patextend-201405-segments-2.shp'
     fname = os.path.expanduser(input_routes_fname)
     input_routes_shp = osgeo.ogr.Open(fname, 0)
     if input_routes_shp is None:
