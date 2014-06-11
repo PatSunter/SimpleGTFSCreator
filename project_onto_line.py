@@ -153,7 +153,6 @@ def get_next_stop_and_dist(route_geom, current_loc_on_route,
                         min_stop_isect_from_seg_start = dist_isect_from_seg_start
                         stop_isect_seg_nearest_start = intersection_point
                         min_stop_from_seg_start_ii = stop_ii
-                    break
             if stop_isect_seg_nearest_start is not None:
                 next_stop_on_route_isect = stop_isect_seg_nearest_start
                 next_stop_on_route_ii = min_stop_from_seg_start_ii
