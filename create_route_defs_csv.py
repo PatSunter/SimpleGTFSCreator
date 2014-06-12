@@ -9,6 +9,8 @@ from osgeo import ogr
 import csv
 import sys
 
+import topology_shapefile_data_model as tp_model
+
 def segs_link(segtuple, othersegtuple):
     if segtuple[1] == othersegtuple[1]:
         return segtuple[1]
@@ -84,10 +86,10 @@ def process_all_routes(input_shp_fname, output_fname):
     layer = shapefile.GetLayer(0)
     all_routes = {}
     for feature in layer:
-        seg_id = int(feature.GetField("id"))
-        seg_routes = feature.GetField("route_list")
-        pt_a = feature.GetField("pt_a")
-        pt_b = feature.GetField("pt_b")
+        seg_id = int(feature.GetField(tp_model.SEG_ID_FIELD))
+        seg_routes = feature.GetField(tp_model.SEG_ROUTE_LIST_FIELD)
+        pt_a = feature.GetField(tp_model.SEG_STOP_1_NAME_FIELD)
+        pt_b = feature.GetField(tp_model.SEG_STOP_2_NAME_FIELD)
         seg_rlist = seg_routes.split(',')
         segtuple = (seg_id, pt_a, pt_b)
         for route in seg_rlist:
