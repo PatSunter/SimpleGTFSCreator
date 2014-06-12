@@ -21,6 +21,7 @@ import transitfeed
 
 import mode_timetable_info as m_t_info
 import topology_shapefile_data_model as tp_model
+import route_segs
 
 # Will determine how much infor is printed.
 VERBOSE = False
@@ -34,9 +35,6 @@ class Seq_Stop_Info:
         self.dist_km_to_next = 0
         self.peak_speed_next = 0
         self.free_speed_next = 0
-
-def get_route_num(routeDictEntry):
-    return int(routeDictEntry['name'][1:])
 
 def save_seq_stop_speed_info(seq_stop_info, next_segment, stops_lyr,
         use_seg_speeds):
@@ -67,31 +65,11 @@ def save_seq_stop_speed_info(seq_stop_info, next_segment, stops_lyr,
     seq_stop_info.dist_km_to_next = tp_model.get_distance_km(next_segment)
     return
 
-def read_route_defs(csv_file_name):
-    route_defs = []
-    csv_file = open(csv_file_name, 'r')
-    if csv_file is None:
-        print "Error, route mapping CSV file given, %s , failed to open." \
-            % (csv_file_name)
-        sys.exit(1) 
-    reader = csv.reader(csv_file, delimiter=';', quotechar="'") 
-    # skip headings
-    reader.next()
-    for ii, row in enumerate(reader):
-        route_def = {}
-        route_def['name'] = row[0]
-        dir1 = row[1]
-        dir2 = row[2]
-        route_def['directions'] = (dir1, dir2)
-        segments_str = row[3].split(',')
-        route_def['segments'] = [int(segstr) for segstr in segments_str]
-        route_defs.append(route_def)
-    return route_defs
-
 def create_gtfs_route_entries(route_defs, mode_config, schedule):
     print "%s() called." % inspect.stack()[0][3]
     # Routes
-    for ii, route_def in enumerate(sorted(route_defs, key=get_route_num)):
+    sorted_route_defs = sorted(route_defs, key=route_segs.get_route_num)
+    for ii, route_def in enumerate(sorted_route_defs):
         route_long_name = route_def["name"]
         route_short_name = None
         route_description = None
@@ -106,7 +84,6 @@ def create_gtfs_route_entries(route_defs, mode_config, schedule):
             (route_id, route_long_name)
         schedule.AddRouteObject(route)
 
-
 def create_gtfs_stop_entries(stops_shapefile, mode_config, schedule):
     """This function requires that in the stops shapefile, there is an
     attribute called 'Name' listing the name of the stop. (Note: it is ok if
@@ -119,7 +96,7 @@ def create_gtfs_stop_entries(stops_shapefile, mode_config, schedule):
         
         #stop_name = stop_feature.GetField('Name')
         # For BZE's "Interchange" stops file
-        stop_id = stop_feature.GetField('ID')
+        stop_id = stop_feature.GetField(tp_model.STOP_ID_FIELD)
         if stop_id is None:
             continue
         stop_name = stop_prefix + str(int(stop_id))
@@ -183,7 +160,8 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
     trip_ctr = 0
     # Do routes and directions as outer loops rather than service periods - as 
     # allows maximal pre-calculation
-    for ii, route_def in enumerate(sorted(route_defs, key=get_route_num)):
+    sorted_route_defs = sorted(route_defs, key=route_segs.get_route_num)
+    for ii, route_def in enumerate(sorted_route_defs):
         print "Adding trips and stops for route '%s'" % (route_def['name'])
         gtfs_route_id = str(mode_config['index'] + ii)
         #Re-grab the route entry from our GTFS schedule
@@ -288,46 +266,6 @@ def get_gtfs_stop_byname(stop_name, schedule):
         sys.exit(1)
     return stop 
 
-def get_stop_feature_name(feature):
-    # fname = feature.GetField('Name') 
-    stop_id = feature.GetField(tp_model.STOP_NAME_FIELD)
-    if stop_id is None:
-        stop_name = None
-    else:
-        if type(stop_id) == str:
-            stop_name = stop_id
-        else:    
-            stop_name = "B"+str(int(stop_id))
-    return stop_name
-
-def get_stop_feature(stop_name, stops_lyr):
-    # Just do a linear search for now.
-    match_feature = None
-    for feature in stops_lyr:
-        fname = get_stop_feature_name(feature)
-        if fname == stop_name:
-            match_feature = feature
-            break;    
-    stops_lyr.ResetReading()        
-    return match_feature
-
-def get_route_segment(segment_id, route_segments_lyr):
-    # Just do a linear search for now.
-    match_feature = None
-    for feature in route_segments_lyr:
-        if int(feature.GetField('id')) == segment_id:
-            match_feature = feature
-            break;    
-    route_segments_lyr.ResetReading()        
-    return match_feature
-
-def get_other_stop_name(segment, stop_name):
-    stop_name_a = segment.GetField(tp_model.SEG_STOP_1_NAME_FIELD)
-    if stop_name == stop_name_a:
-        return segment.GetField(tp_model.SEG_STOP_2_NAME_FIELD)
-    else:
-        return stop_name_a
-
 def get_stop_order(segment, next_seg):
     """Use the fact that for two segments, in the first segment, there must be
     a matching stop with the 2nd segment. Return the IDs of the 1st and 2nd 
@@ -357,14 +295,6 @@ def get_stop_order(segment, next_seg):
         sys.exit(1)       
     return first_stop_name, second_stop_name
 
-def build_segs_lookup_table(route_segments_lyr):
-    lookup_dict = {}
-    for feature in route_segments_lyr:
-        seg_id = (feature.GetField('id'))
-        lookup_dict[int(seg_id)] = feature
-    route_segments_lyr.ResetReading()
-    return lookup_dict
-
 def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_shp,
         stops_shp, mode_config, schedule, use_seg_speeds):
 
@@ -372,12 +302,12 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
     route_segments_lyr = route_segments_shp.GetLayer(0)
     stops_lyr = stops_shp.GetLayer(0)
 
-    # Apply a filter to speed up calculations.
+    # Apply a filter to speed up calculations - only segments on this route.
     where_clause = "%s LIKE '%%%s' OR %s LIKE '%%%s,%%'" % \
         (tp_model.SEG_ROUTE_LIST_FIELD, route_def["name"],\
         tp_model.SEG_ROUTE_LIST_FIELD, route_def["name"])
     route_segments_lyr.SetAttributeFilter(where_clause)
-    segs_lookup_table = build_segs_lookup_table(route_segments_lyr)
+    segs_lookup_table = tp_model.build_segs_lookup_table(route_segments_lyr)
 
     if len(route_def['segments']) == 0:
         print "Warning: for route name '%s', no route segments defined." \
@@ -386,8 +316,8 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
 
     # If direction ID is 1 - generally "away from city" - 
     # create an list in reverse stop id order.
-    # N.B. :- created this temporary list since we now need to look ahead to
-    # check for 'matching' stops in segments.
+    # N.B. :- created this temporary list (not just iterator) since we now need
+    # to look ahead to check for 'matching' stops in segments.
     if dir_id == 0:
         segments = list(route_def["segments"])
     else:
@@ -396,8 +326,8 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
     stop_seq = 0
     for seg_ctr, segment_id in enumerate(segments):
         # segment = get_route_segment(segment_id, route_segments_lyr)
-        segment = segs_lookup_table[segment_id]
-        if segment is None:
+        seg_feature = segs_lookup_table[segment_id]
+        if seg_feature is None:
             print "Error: didn't locate segment in shapefile with given id " \
                 "%d." % (segment_id)
             sys.exit(1)    
@@ -405,24 +335,25 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
             # special case for a route with only one segment.
             if len(segments) == 1:
                 if dir_id == 0:
-                    first_stop_name = segment.GetField(
+                    first_stop_name = seg_feature.GetField(
                         tp_model.SEG_STOP_1_NAME_FIELD)
-                    second_stop_name = segment.GetField(
+                    second_stop_name = seg_feature.GetField(
                         tp_model.SEG_STOP_2_NAME_FIELD)
                 else:    
-                    first_stop_name = segment.GetField(
+                    first_stop_name = seg_feature.GetField(
                         tp_model.SEG_STOP_2_NAME_FIELD)
-                    second_stop_name = segment.GetField(
+                    second_stop_name = seg_feature.GetField(
                         tp_model.SEG_STOP_1_NAME_FIELD)
             else:        
                 next_seg_id = segments[seg_ctr+1]
                 #next_seg = get_route_segment(next_seg_id, route_segments_lyr)
                 next_seg = segs_lookup_table[next_seg_id]
-                first_stop_name, second_stop_name = get_stop_order(segment,
+                first_stop_name, second_stop_name = get_stop_order(seg_feature,
                     next_seg)
         else:
             first_stop_name = prev_second_stop_name
-            second_stop_name = get_other_stop_name(segment, first_stop_name)
+            second_stop_name = tp_model.get_other_stop_name(seg_feature,
+                first_stop_name)
 
         # NB: temporarily searching by name.
         #first_stop_id_gtfs = get_gtfs_stop_id(first_stop_id, mode_config)
@@ -431,7 +362,7 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
         s_info = Seq_Stop_Info(first_stop)
         # We are still going to save key info now, to save accessing the
         # shapefile layers again unnecessarily later.
-        save_seq_stop_speed_info(s_info, segment, stops_lyr, use_seg_speeds)
+        save_seq_stop_speed_info(s_info, seg_feature, stops_lyr, use_seg_speeds)
         prebuilt_stop_info_list.append(s_info)
         stop_seq += 1
         # Save this to help with calculations in subsequent steps
@@ -545,7 +476,7 @@ def process_data(route_defs_csv_fname, input_segments_fname,
         mode_config['loc'], agency_id=mode_config['id'])
 
     # Now see if we can open both needed shape files correctly
-    route_defs = read_route_defs(route_defs_csv_fname)
+    route_defs = route_segs.read_route_defs(route_defs_csv_fname)
     route_segments_shp = osgeo.ogr.Open(input_segments_fname)
     if route_segments_shp is None:
         print "Error, route segments shape file given, %s , failed to open." \

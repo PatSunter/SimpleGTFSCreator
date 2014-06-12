@@ -13,6 +13,7 @@ from osgeo import ogr, osr
 
 import project_onto_line as lineargeom
 import topology_shapefile_data_model as tp_model
+import route_segs
 
 class TransferNetworkDef:
     def __init__(self, shp_fname, tfer_range, stop_min_dist, stop_typ_name):
@@ -552,15 +553,9 @@ def get_multipoint_within_with_map(multipoint, test_geom):
             isect_map.append(pt_i)
     return mpoint_within, isect_map
 
-def create_segments(input_routes_lyr, input_stops_lyr, segs_shp_file_name):
-    """Creates all the route segments, from a given set of stops.
-    
-    Note: See comments re projections below, it gets a bit tricky in this one."""
-    
-    segs_shp_file, segments_lyr = tp_model.create_segs_shp_file(
-        segs_shp_file_name, delete_existing=DELETE_EXISTING)
-    all_seg_tuples = []
-    route_seg_tuples = []
+def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
+    all_seg_refs = []
+    route_seg_refs = []
     routes_srs = input_routes_lyr.GetSpatialRef()
     stops_srs = input_stops_lyr.GetSpatialRef()
 
@@ -568,13 +563,15 @@ def create_segments(input_routes_lyr, input_stops_lyr, segs_shp_file_name):
     stops_multipoint = build_multipoint_from_lyr(input_stops_lyr)
     reproject_all_multipoint(stops_multipoint, routes_srs)
 
-    print "Creating Route segments"
+    print "Building route segment ref. infos:"
     for ii, route in enumerate(input_routes_lyr):
         rname = route.GetField(0)
-        route_seg_tuples.append((rname,[]))
+        start_cnt = len(all_seg_refs)
+        new_segs_cnt = 0
+        seg_refs_this_route = []
         #if rname not in ['R103', 'R104', 'R105', 'R110']: continue
-        start_cnt = segments_lyr.GetFeatureCount()
-        print "Creating route segments for route %s" % rname
+        if rname not in ['R27']: continue
+        print "Creating route segments infos for route %s" % rname
         # Get the stops of interest along route, we need to 'walk'
         route_geom = route.GetGeometryRef()
         route_buffer = route_geom.Buffer(
@@ -622,22 +619,14 @@ def create_segments(input_routes_lyr, input_stops_lyr, segs_shp_file_name):
                 #        (last_stop_i_along_route, last_stop_id,\
                 #         next_stop_i_along_route, next_stop_id,\
                 #         dist_to_next)
-                seg_geom = ogr.Geometry(ogr.wkbLineString)
-                # Add the geoms from the orig stops layer - as likely this
-                # is the same as that desired for segs layer
-                seg_geom.AssignSpatialReference(stops_srs)
-                seg_geom.AddPoint(*last_stop.GetGeometryRef().GetPoint(0))
-                seg_geom.AddPoint(*next_stop.GetGeometryRef().GetPoint(0))
-                seg_ii, seg_id, new_status = tp_model.add_update_segment(
-                    segments_lyr, last_stop_id, next_stop_id, rname,
-                    dist_to_next, seg_geom, all_seg_tuples)
-                new_seg_tuple = (seg_ii, last_stop_id, next_stop_id)
-                if new_status == True:
-                    all_seg_tuples.append(new_seg_tuple)
-                route_seg_tuples[-1][1].append(new_seg_tuple)
+                # This function will also handle updating the seg_ref lists
+                seg_ref, new_status = route_segs.add_update_seg_ref(
+                    last_stop_id, next_stop_id, rname,
+                    dist_to_next, all_seg_refs, seg_refs_this_route)
+                if new_status:
+                    new_segs_cnt += 1
                 last_stop.Destroy()
                 next_stop.Destroy()
-                seg_geom.Destroy()    
             else:
                 if dist_to_next > lineargeom.DIST_FOR_MATCHING_STOPS_ON_ROUTES:
                     print "Warning: for route %s, first stop is %.1fm from "\
@@ -659,20 +648,57 @@ def create_segments(input_routes_lyr, input_stops_lyr, segs_shp_file_name):
                 # We've added all segments
                 line_remains = False
                 break
-        end_cnt = segments_lyr.GetFeatureCount()
-        print "..Added %d new segs in total for this route." % \
-            (end_cnt - start_cnt)
+        route_seg_refs.append((rname,seg_refs_this_route))
+        end_cnt = len(all_seg_refs)
+        assert (end_cnt - start_cnt) == new_segs_cnt
+        print "..Added %d seg refs for this route (%d of which were new)." % \
+            (len(seg_refs_this_route), new_segs_cnt)
+        if len(seg_refs_this_route) == 0:
+            print "*WARNING*:- Just processed a route ('%s') which resulted "\
+                "zero segments. Is the route a loop? Suggest checking "\
+                "route layer in a GIS package." % rname
         route_buffer.Destroy()
         stops_near_route.Destroy()
         end_vertex.Destroy()
-    total_segs = segments_lyr.GetFeatureCount()
     nroutes = input_routes_lyr.GetFeatureCount()
+    total_segs = len(all_seg_refs)
     mean_segs_per_route = total_segs / float(nroutes)
-    print "\nAdded %d new segs in total for the %d routes (av. %.1f "\
+    print "\nAdded %d new seg refs in total for the %d routes (av. %.1f "\
         "segs/route)." % (total_segs, nroutes, mean_segs_per_route)
     input_routes_lyr.ResetReading()
+    return all_seg_refs, route_seg_refs
+
+def create_segments(input_routes_lyr, input_stops_lyr, segs_shp_file_name):
+    """Creates all the route segments, from a given set of stops.
+    
+    Note: See comments re projections below, it gets a bit tricky in this one."""
+    
+    stops_srs = input_stops_lyr.GetSpatialRef()
+
+    all_seg_refs, route_seg_refs = build_seg_ref_lists(input_routes_lyr,
+        input_stops_lyr)
+
+    print "Writing segment references to shapefile..."
+    segs_shp_file, segments_lyr = tp_model.create_segs_shp_file(
+        segs_shp_file_name, delete_existing=DELETE_EXISTING)
+
+    # Build lookup table by stop ID into stops layer - for speed
+    stops_lookup_dict = tp_model.build_stops_lookup_table(input_stops_lyr)
+
+    for seg_ref in all_seg_refs:
+        # look up corresponding stops in lookup table, and build geometry
+        stop_feat_a = stops_lookup_dict[seg_ref.first_id]
+        stop_feat_b = stops_lookup_dict[seg_ref.second_id]
+        seg_geom = ogr.Geometry(ogr.wkbLineString)
+        seg_geom.AssignSpatialReference(stops_srs)
+        seg_geom.AddPoint(*stop_feat_a.GetGeometryRef().GetPoint(0))
+        seg_geom.AddPoint(*stop_feat_b.GetGeometryRef().GetPoint(0))
+        seg_ii = tp_model.add_seg_ref_as_feature(
+            segments_lyr, seg_ref, seg_geom)
+        seg_geom.Destroy()
     # Force a write.
     segs_shp_file.Destroy()
+    print "...done writing."
     return
 
 if __name__ == "__main__":

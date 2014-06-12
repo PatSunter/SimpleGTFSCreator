@@ -29,10 +29,85 @@ STOP_ID_FIELD = "gid"               # int, 10
 STOP_NAME_FIELD = "ID"              # int, 10
 STOP_TYPE_FIELD = "typ"             # str, 50 - reasonable length type strs.
 
+def build_stops_lookup_table(stops_lyr):
+    """Given a layer of stops, creates a 'lookup table' dict where 
+    keys are stop IDs, and values are ptrs to individual features.
+    
+    This is useful to build for speedup where a subsequent algorithm
+    will need to access individual stops many times.
+    
+    NOTE: meant as a temporary structure, since as soon as you close the
+    relevant shapefile or modify the layer, it becomes redundant."""
+    lookup_dict = {}
+    for feature in stops_lyr:
+        stop_id = (feature.GetField(STOP_ID_FIELD))
+        lookup_dict[int(stop_id)] = feature
+    stops_lyr.ResetReading()
+    return lookup_dict
+
+def build_segs_lookup_table(route_segments_lyr):
+    """Given a layer of route segments, creates a 'lookup table' dict where 
+    keys are segment IDs, and values are ptrs to individual features.
+    
+    This is useful to build for speedup where a subsequent algorithm
+    will need to access individual segments many times (e.g. when processing
+    routes).
+    
+    NOTE: meant as a temporary structure, since as soon as you close the
+    relevant shapefile or modify the layer, it becomes redundant."""
+    lookup_dict = {}
+    for feature in route_segments_lyr:
+        seg_id = (feature.GetField(SEG_ID_FIELD))
+        lookup_dict[int(seg_id)] = feature
+    route_segments_lyr.ResetReading()
+    return lookup_dict
+
 def get_distance_km(seg_feature):
     rdist = float(seg_feature.GetField(SEG_ROUTE_DIST_FIELD))
     rdist = rdist / ROUTE_DIST_RATIO_TO_KM
     return rdist
+
+# These get() funcs below were originally in create_gtfs_from_basicinfo.py
+def get_stop_feature_name(feature, stop_prefix):
+    stop_id = feature.GetField(STOP_NAME_FIELD)
+    if stop_id is None:
+        stop_name = None
+    else:
+        if type(stop_id) == str:
+            stop_name = stop_id
+        else:    
+            stop_name = stop_prefix+str(int(stop_id))
+    return stop_name
+
+def get_stop_feature(stop_name, stops_lyr, stop_prefix):
+    # Just do a linear search for now.
+    match_feature = None
+    for feature in stops_lyr:
+        fname = get_stop_feature_name(feature, stop_prefix)
+        if fname == stop_name:
+            match_feature = feature
+            break;    
+    stops_lyr.ResetReading()        
+    return match_feature
+
+def get_route_segment(segment_id, route_segments_lyr):
+    # Just do a linear search for now.
+    match_feature = None
+    for feature in route_segments_lyr:
+        if int(feature.GetField(SEG_ID_FIELD)) == segment_id:
+            match_feature = feature
+            break;    
+    route_segments_lyr.ResetReading()        
+    return match_feature
+
+def get_other_stop_name(segment, stop_name):
+    stop_name_a = segment.GetField(SEG_STOP_1_NAME_FIELD)
+    if stop_name == stop_name_a:
+        return segment.GetField(SEG_STOP_2_NAME_FIELD)
+    else:
+        return stop_name_a
+
+################
 
 def create_stops_shp_file(stops_shp_file_name, delete_existing=False):
     """Creates an empty stops shapefile. Returns the newly created shapefile,
@@ -144,10 +219,15 @@ def create_segs_shp_file(segs_shp_file_name, delete_existing=False):
     print "... done."
     return segs_shp_file, layer
 
-def add_new_segment(segs_lyr, start_stop_id, end_stop_id, route_name,
-        route_dist_on_seg, seg_geom):
+def add_route_to_seg(segments_lyr, seg_feat, route_name):
+    orig_list = seg_feat.GetField(SEG_ROUTE_LIST_FIELD)
+    upd_list = orig_list + ",%s" % route_name
+    seg_feat.SetField(SEG_ROUTE_LIST_FIELD, upd_list)
+    segments_lyr.SetFeature(seg_feat)
+    return
+
+def add_seg_ref_as_feature(segs_lyr, seg_ref, seg_geom):
     seg_ii = segs_lyr.GetFeatureCount()
-    seg_id = seg_ii + 1                 # Start from 1.
     #Create seg feature, with needed fields etc.
     seg_feat = ogr.Feature(segs_lyr.GetLayerDefn())
     #Need to re-project geometry into target SRS (do this now,
@@ -162,54 +242,15 @@ def add_new_segment(segs_lyr, start_stop_id, end_stop_id, route_name,
     seg_geom2 = seg_geom.Clone()
     seg_geom2.Transform(transform)
     seg_feat.SetGeometry(seg_geom2)
-    seg_feat.SetField(SEG_ID_FIELD, seg_id)
-    seg_feat.SetField(SEG_ROUTE_LIST_FIELD, route_name)
-    seg_feat.SetField(SEG_STOP_1_NAME_FIELD, "B%d" % start_stop_id)
-    seg_feat.SetField(SEG_STOP_2_NAME_FIELD, "B%d" % end_stop_id)
+    seg_feat.SetField(SEG_ID_FIELD, seg_ref.seg_id)
+    seg_feat.SetField(SEG_ROUTE_LIST_FIELD, ",".join(seg_ref.routes))
+    seg_feat.SetField(SEG_STOP_1_NAME_FIELD, "B%d" % seg_ref.first_id)
+    seg_feat.SetField(SEG_STOP_2_NAME_FIELD, "B%d" % seg_ref.second_id)
     # Rounding to nearest meter below per convention.
-    seg_feat.SetField(SEG_ROUTE_DIST_FIELD, "%.0f" % route_dist_on_seg)
+    seg_feat.SetField(SEG_ROUTE_DIST_FIELD, "%.0f" % seg_ref.route_dist_on_seg)
     seg_feat.SetField(SEG_FREE_SPEED_FIELD, 0.0)
     seg_feat.SetField(SEG_PEAK_SPEED_FIELD, 0.0)
     segs_lyr.CreateFeature(seg_feat)
     seg_feat.Destroy()
     seg_geom2.Destroy()
-    return seg_ii, seg_id
-
-def add_route_to_seg(segments_lyr, seg_feat, route_name):
-    orig_list = seg_feat.GetField(SEG_ROUTE_LIST_FIELD)
-    upd_list = orig_list + ",%s" % route_name
-    seg_feat.SetField(SEG_ROUTE_LIST_FIELD, upd_list)
-    segments_lyr.SetFeature(seg_feat)
-    return
-
-def add_update_segment(segments_lyr, start_stop_id,
-        end_stop_id, route_name, route_dist_on_seg, seg_geom,
-        all_seg_tuples):
-    seg_id = None
-    new_status = False
-    # First, search for existing segment in list
-    # TODO:- search in all_seg_tuples for tuple with right attribs
-    matched_seg = None
-    matched_seg_tuple = None
-    for seg_tuple in all_seg_tuples:
-        if seg_tuple[1] == start_stop_id and seg_tuple[2] == end_stop_id or \
-                seg_tuple[1] == end_stop_id and seg_tuple[2] == start_stop_id:
-            matched_seg_tuple = seg_tuple
-            matched_seg = segments_lyr.GetFeature(matched_seg_tuple[0])
-            break
-    if matched_seg:
-        #print "While adding, matched a segment! Seg id = %s, existing "\
-        #    "routes = '%s', new route = '%s'" %\
-        #    (matched_seg.GetField(SEG_ID_FIELD),\
-        #    matched_seg.GetField(SEG_ROUTE_LIST_FIELD),\
-        #    route_name)
-        add_route_to_seg(segments_lyr, matched_seg, route_name)
-        new_status = False
-        seg_ii = matched_seg_tuple[0]
-        seg_id = matched_seg.GetField(SEG_ID_FIELD)
-    else:    
-
-        seg_ii, seg_id = add_new_segment(segments_lyr, start_stop_id, end_stop_id,
-            route_name, route_dist_on_seg, seg_geom)
-        new_status = True
-    return seg_ii, seg_id, new_status
+    return seg_ii
