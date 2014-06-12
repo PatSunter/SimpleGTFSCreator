@@ -38,13 +38,6 @@ class Seq_Stop_Info:
 def get_route_num(routeDictEntry):
     return int(routeDictEntry['name'][1:])
 
-def get_distance_km(segment):
-    # In H's script, this will be saved as an attribute in the generation
-    # phase.
-    rdist = float(segment.GetField(tp_model.SEG_ROUTE_DIST_FIELD))
-    rdist = rdist / tp_model.ROUTE_DIST_RATIO_TO_KM
-    return rdist
-
 def save_seq_stop_speed_info(seq_stop_info, next_segment, stops_lyr,
         use_seg_speeds):
     try:
@@ -71,7 +64,7 @@ def save_seq_stop_speed_info(seq_stop_info, next_segment, stops_lyr,
         else:
             # Ok to continue in this case.
             pass
-    seq_stop_info.dist_km_to_next = get_distance_km(next_segment)
+    seq_stop_info.dist_km_to_next = tp_model.get_distance_km(next_segment)
     return
 
 def read_route_defs(csv_file_name):

@@ -29,6 +29,11 @@ STOP_ID_FIELD = "gid"               # int, 10
 STOP_NAME_FIELD = "ID"              # int, 10
 STOP_TYPE_FIELD = "typ"             # str, 50 - reasonable length type strs.
 
+def get_distance_km(seg_feature):
+    rdist = float(seg_feature.GetField(SEG_ROUTE_DIST_FIELD))
+    rdist = rdist / ROUTE_DIST_RATIO_TO_KM
+    return rdist
+
 def create_stops_shp_file(stops_shp_file_name, delete_existing=False):
     """Creates an empty stops shapefile. Returns the newly created shapefile,
     and the stops layer within it."""
