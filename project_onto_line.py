@@ -48,23 +48,23 @@ def intersect_point_to_line(point, line_start, line_end):
         # A zero length segment - just return one of the endpoints as closest
         return line_start, False
 
-    u = ((point[0] - line_start[0]) * (line_end[0] - line_start[0]) +
+    uval = ((point[0] - line_start[0]) * (line_end[0] - line_start[0]) +
          (point[1] - line_start[1]) * (line_end[1] - line_start[1])) \
          / (line_magnitude ** 2)
 
     # closest point does not fall within the line segment, 
     # take the shorter distance to an endpoint
-    if u < 0.00001 or u > 1:
+    if uval < 0.00001 or uval > 1:
         ix = magnitude(point, line_start)
         iy = magnitude(point, line_end)
         if ix > iy:
-            return line_end, False
+            return line_end, False, uval
         else:
-            return line_start, False
+            return line_start, False, uval
     else:
         ix = line_start[0] + u * (line_end[0] - line_start[0])
         iy = line_start[1] + u * (line_end[1] - line_start[1])
-        return (ix, iy), True
+        return (ix, iy), True, uval
 
 def nearest_point_on_polyline_to_point(polyline, point):
     assert polyline.GetGeometryName() == "LINESTRING"
@@ -76,14 +76,14 @@ def nearest_point_on_polyline_to_point(polyline, point):
         line_start = seg_start
         line_end = seg_end
 
-        intersection_point, within_seg = intersect_point_to_line(point,
+        intersection_point, within_seg, uval = intersect_point_to_line(point,
             line_start, line_end)
         cur_dist = magnitude(point, intersection_point)
 
         if cur_dist < min_dist:
             min_dist = cur_dist
             nearest_point = intersection_point
-    return nearest_point
+    return nearest_point, min_dist
 
 def advance_along_route_to_loc(route_geom, segs_iterator, loc):
     # This first section is to skip ahead to correct segment and project
@@ -92,7 +92,7 @@ def advance_along_route_to_loc(route_geom, segs_iterator, loc):
     start_stop_proj_onto_route = None
     min_dist_to_route = sys.maxint
     for seg_start, seg_end in segs_iterator:
-        intersection_point, within_seg = intersect_point_to_line(loc,
+        intersection_point, within_seg, uval = intersect_point_to_line(loc,
             seg_start, seg_end)
         cur_dist = magnitude(loc, intersection_point)
         if cur_dist < min_dist_to_route:
@@ -141,8 +141,8 @@ def get_next_stop_and_dist(route_geom, current_loc_on_route,
             for stop_ii in rem_stop_is:
                 stop_geom = stops_multipoint_near_route.GetGeometryRef(stop_ii)
                 stop_pt = stop_geom.GetPoint(0)
-                intersection_point, within_seg = intersect_point_to_line(stop_pt,
-                    seg_start, seg_end)
+                intersection_point, within_seg, uval = intersect_point_to_line(
+                    stop_pt, seg_start, seg_end)
                 cur_dist = magnitude(stop_pt, intersection_point)
                 # See comment in above loop re this 2-clause test.
                 if (cur_dist < VERY_NEAR_LINE) or \
