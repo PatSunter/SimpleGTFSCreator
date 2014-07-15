@@ -131,6 +131,11 @@ settings = {
     },    
 }
 
+# These refs are necessary for setting appropriate speed for both bus and
+# bus-motorway networks, which move between motorways and streets.
+settings['bus']['on_motorway'] = settings['bus-motorway']
+settings['bus-motorway']['on_street'] = settings['bus']
+
 # These are plain strings, as required by the transitfeed library
 START_DATE_STR = '20130101'
 END_DATE_STR = '20141231'
