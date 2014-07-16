@@ -443,10 +443,6 @@ def add_filler_stops(stops_lyr, input_routes_lyr, filler_dist,
     for ii, route in enumerate(input_routes_lyr):
         rname = route.GetField(0)
         print "Adding Filler stops for route %s" % rname
-        #if rname == 'R16':
-        #    #break
-        #    import pdb
-        #    pdb.set_trace()
         route_geom = route.GetGeometryRef()
         # First, get the stops of interest along route, we need to 'walk'
         route_buffer = route_geom.Buffer(
