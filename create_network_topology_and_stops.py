@@ -15,6 +15,8 @@ import project_onto_line as lineargeom
 import topology_shapefile_data_model as tp_model
 import route_segs
 
+import mode_timetable_info as m_t_info
+
 COMPARISON_EPSG = 28355
 
 class TransferNetworkDef:
@@ -681,7 +683,8 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
     input_routes_lyr.ResetReading()
     return all_seg_refs, route_seg_refs
 
-def create_segments(input_routes_lyr, input_stops_lyr, segs_shp_file_name):
+def create_segments(input_routes_lyr, input_stops_lyr, segs_shp_file_name,
+        mode_config):
     """Creates all the route segments, from a given set of stops.
     
     Note: See comments re projections below, it gets a bit tricky in this one."""
@@ -707,7 +710,7 @@ def create_segments(input_routes_lyr, input_stops_lyr, segs_shp_file_name):
         seg_geom.AddPoint(*stop_feat_a.GetGeometryRef().GetPoint(0))
         seg_geom.AddPoint(*stop_feat_b.GetGeometryRef().GetPoint(0))
         seg_ii = tp_model.add_seg_ref_as_feature(
-            segments_lyr, seg_ref, seg_geom)
+            segments_lyr, seg_ref, seg_geom, mode_config)
         seg_geom.Destroy()
     # Force a write.
     segs_shp_file.Destroy()
@@ -718,6 +721,8 @@ if __name__ == "__main__":
     input_routes_fname = './network_topology_testing/network-self-snapped-reworked-patextend-201405.shp'
     stops_shp_file_name = './network_topology_testing/network-self-snapped-reworked-patextend-201405-stops-inc-fillers-2.shp'
     segments_shp_file_name = './network_topology_testing/network-self-snapped-reworked-patextend-201405-segments-2.shp'
+    mode_config = m_t_info.settings['bus']
+
     fname = os.path.expanduser(input_routes_fname)
     input_routes_shp = osgeo.ogr.Open(fname, 0)
     if input_routes_shp is None:
@@ -749,6 +754,6 @@ if __name__ == "__main__":
         sys.exit(1)
     stops_lyr = stops_shp.GetLayer(0)   
     create_segments(input_routes_lyr, stops_lyr,
-        segments_shp_file_name)
+        segments_shp_file_name, mode_config)
     input_routes_shp.Destroy()
     stops_shp.Destroy()    

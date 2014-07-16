@@ -226,13 +226,14 @@ def add_route_to_seg(segments_lyr, seg_feat, route_name):
     segments_lyr.SetFeature(seg_feat)
     return
 
-def add_seg_ref_as_feature(segs_lyr, seg_ref, seg_geom):
+def add_seg_ref_as_feature(segs_lyr, seg_ref, seg_geom, mode_config):
     seg_ii = segs_lyr.GetFeatureCount()
     #Create seg feature, with needed fields etc.
     seg_feat = ogr.Feature(segs_lyr.GetLayerDefn())
     #Need to re-project geometry into target SRS (do this now,
     # after we've added to multipoint, which should be in same SRS as
     # above).
+    prefix = mode_config['stop_prefix']
     assert(seg_geom.GetPointCount() == 2)
     src_srs = seg_geom.GetSpatialReference()
     target_srs = segs_lyr.GetSpatialRef()
@@ -244,8 +245,8 @@ def add_seg_ref_as_feature(segs_lyr, seg_ref, seg_geom):
     seg_feat.SetGeometry(seg_geom2)
     seg_feat.SetField(SEG_ID_FIELD, seg_ref.seg_id)
     seg_feat.SetField(SEG_ROUTE_LIST_FIELD, ",".join(seg_ref.routes))
-    seg_feat.SetField(SEG_STOP_1_NAME_FIELD, "B%d" % seg_ref.first_id)
-    seg_feat.SetField(SEG_STOP_2_NAME_FIELD, "B%d" % seg_ref.second_id)
+    seg_feat.SetField(SEG_STOP_1_NAME_FIELD, "%s%d" % (prefix, seg_ref.first_id))
+    seg_feat.SetField(SEG_STOP_2_NAME_FIELD, "%s%d" % (prefix, seg_ref.second_id))
     # Rounding to nearest meter below per convention.
     seg_feat.SetField(SEG_ROUTE_DIST_FIELD, "%.0f" % seg_ref.route_dist_on_seg)
     seg_feat.SetField(SEG_FREE_SPEED_FIELD, 0.0)
