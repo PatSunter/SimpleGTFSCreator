@@ -193,7 +193,7 @@ def get_nearest_point_on_route_within_buf_basic(search_pt_geom, route_geom,
 
 def get_nearest_point_on_route_within_buf_fast(search_pt_geom, route_geom,
         route_geom_within_range):
-    near_coords = lineargeom.nearest_point_on_polyline_to_point(
+    near_coords, near_dist = lineargeom.nearest_point_on_polyline_to_point(
         route_geom_within_range, search_pt_geom.GetPoints()[0])
     closest_point_geom = ogr.Geometry(ogr.wkbPoint)
     closest_point_geom.AddPoint(*near_coords)
@@ -432,13 +432,17 @@ def add_other_network_transfer_stops(stops_lyr, input_routes_lyr,
         tfer_nw_stop_shp.Destroy()    
     return
 
-def add_filler_stops(stops_lyr, filler_dist, input_routes_lyr,
+def add_filler_stops(stops_lyr, input_routes_lyr, filler_dist,
         filler_stop_type, stops_multipoint):
-
-    src_srs = input_routes_lyr.GetSpatialRef()
     print "\nAdding Filler stops at max dist %.1fm:" % filler_dist
+    src_srs = input_routes_lyr.GetSpatialRef()
     for ii, route in enumerate(input_routes_lyr):
-        print "Adding Filler stops for route %s" % route.GetField(0)
+        rname = route.GetField(0)
+        print "Adding Filler stops for route %s" % rname
+        #if rname == 'R16':
+        #    #break
+        #    import pdb
+        #    pdb.set_trace()
         route_geom = route.GetGeometryRef()
         # First, get the stops of interest along route, we need to 'walk'
         route_buffer = route_geom.Buffer(
@@ -484,17 +488,22 @@ def add_filler_stops(stops_lyr, filler_dist, input_routes_lyr,
             # Walk ahead.
             current_loc = next_stop_on_route_isect
             last_stop_i_along_route = next_stop_i_along_route
-            # For safety, we're going to compute distance from end pt as
-            #  a stopping condition check as well.
-            curr_loc_pt = ogr.Geometry(ogr.wkbPoint)
-            curr_loc_pt.AddPoint(*current_loc)
-            dist_to_end = curr_loc_pt.Distance(end_vertex)
-            curr_loc_pt.Destroy()
-            if next_stop_on_route_isect is None or \
-                    dist_to_end < lineargeom.SAME_POINT:
+            #curr_loc_pt = ogr.Geometry(ogr.wkbPoint)
+            #curr_loc_pt.AddPoint(*current_loc)
+            #dist_to_end = curr_loc_pt.Distance(end_vertex)
+            #curr_loc_pt.Destroy()
+            if next_stop_on_route_isect is None or len(rem_stop_is) == 0:
+            #        Comment out this dist_to_end test - case of looped routes
+            #        or dist_to_end < lineargeom.SAME_POINT:
                 # We've added fillers to the last section, so all done.
+                assert len(rem_stop_is) == 0
                 line_remains = False
                 break
+        if stops_found <= 1:
+            print "*WARNING*: while adding filler stops to route '%s', only "\
+                "found %d existing stops. Normally expect to process at "\
+                "least 2 (a start and end stop for the route.)"\
+                % (rname, stops_found)
         route_buffer.Destroy()
         stops_near_route.Destroy()
         end_vertex.Destroy()
@@ -570,7 +579,7 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
         new_segs_cnt = 0
         seg_refs_this_route = []
         #if rname not in ['R103', 'R104', 'R105', 'R110']: continue
-        if rname not in ['R27']: continue
+        #if rname not in ['R27']: continue
         print "Creating route segments infos for route %s" % rname
         # Get the stops of interest along route, we need to 'walk'
         route_geom = route.GetGeometryRef()
@@ -637,15 +646,13 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
             current_loc = next_stop_on_route_isect
             last_stop_i_along_route = next_stop_i_along_route
             last_stop_i_in_route_set = next_stop_i_in_route_set
-            # For safety, we're going to compute distance from end pt as
-            #  a stopping condition check as well.
-            curr_loc_pt = ogr.Geometry(ogr.wkbPoint)
-            curr_loc_pt.AddPoint(*current_loc)
-            dist_to_end = curr_loc_pt.Distance(end_vertex)
-            curr_loc_pt.Destroy()
-            if next_stop_on_route_isect is None or \
-                    dist_to_end < lineargeom.SAME_POINT:
-                # We've added all segments
+            #curr_loc_pt = ogr.Geometry(ogr.wkbPoint)
+            #curr_loc_pt.AddPoint(*current_loc)
+            #dist_to_end = curr_loc_pt.Distance(end_vertex)
+            #curr_loc_pt.Destroy()
+            if next_stop_on_route_isect is None or len(rem_stop_is) == 0:
+            #        or dist_to_end < lineargeom.SAME_POINT:
+                assert len(rem_stop_is) == 0
                 line_remains = False
                 break
         route_seg_refs.append((rname,seg_refs_this_route))
@@ -725,8 +732,8 @@ if __name__ == "__main__":
             nw_def_entry[2], nw_def_entry[3])
         transfer_networks_def.append(tf_nw_def)    
 
-    #create_stops(input_routes_lyr, stops_shp_file_name,
-    #    transfer_networks_def)
+    create_stops(input_routes_lyr, stops_shp_file_name,
+        transfer_networks_def)
 
     fname = os.path.expanduser(stops_shp_file_name)
     stops_shp = osgeo.ogr.Open(fname, 0)
