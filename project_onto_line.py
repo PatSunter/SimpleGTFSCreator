@@ -41,12 +41,16 @@ def point_dist_along_line(line_start, line_end, dist):
     return (ix, iy)
 
 def intersect_point_to_line(point, line_start, line_end):
-    """Finds intersection of point to line. But also, returns a Bool stating
-    if the intersection point was within this line segment."""
+    """Finds intersection of point to line. 
+    But also, returns a Bool stating if the intersection point was
+    within this line segment. And also, the 'uval' stating the
+    linear proportion along the line it was found.
+    (uval values -ve imply before start of line, > 1.0 after end of
+    line)."""
     line_magnitude =  magnitude(line_end, line_start)
     if line_magnitude == 0.0:
         # A zero length segment - just return one of the endpoints as closest
-        return line_start, False
+        return line_start, False, 0.0
 
     uval = ((point[0] - line_start[0]) * (line_end[0] - line_start[0]) +
          (point[1] - line_start[1]) * (line_end[1] - line_start[1])) \
@@ -62,8 +66,8 @@ def intersect_point_to_line(point, line_start, line_end):
         else:
             return line_start, False, uval
     else:
-        ix = line_start[0] + u * (line_end[0] - line_start[0])
-        iy = line_start[1] + u * (line_end[1] - line_start[1])
+        ix = line_start[0] + uval * (line_end[0] - line_start[0])
+        iy = line_start[1] + uval * (line_end[1] - line_start[1])
         return (ix, iy), True, uval
 
 def nearest_point_on_polyline_to_point(polyline, point):
