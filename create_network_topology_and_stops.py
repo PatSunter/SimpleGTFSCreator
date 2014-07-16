@@ -1,7 +1,6 @@
 #!/usr/bin/env python2
 import os
 import os.path
-import re
 import sys
 import inspect
 import operator
@@ -714,18 +713,52 @@ def create_segments(input_routes_lyr, input_stops_lyr, segs_shp_file_name,
     return
 
 if __name__ == "__main__":
-    input_routes_fname = './network_topology_testing/network-self-snapped-reworked-patextend-201405.shp'
-    stops_shp_file_name = './network_topology_testing/network-self-snapped-reworked-patextend-201405-stops-inc-fillers-2.shp'
-    segments_shp_file_name = './network_topology_testing/network-self-snapped-reworked-patextend-201405-segments-2.shp'
-    mode_config = m_t_info.settings['bus']
+    allowedServs = ', '.join(sorted(["'%s'" % key for key in \
+        m_t_info.settings.keys()]))
+    parser = OptionParser()
+    parser.add_option('--routes', dest='inputroutes',
+        help='Shapefile of line routes.')
+    parser.add_option('--segments', dest='outputsegments',
+        help='Shapefile of line segments to create.')
+    parser.add_option('--stops', dest='outputstops',
+        help='Shapefile of line stops to create.')
+    parser.add_option('--service', dest='service',
+        help="Should be one of %s" % allowedServs)
+    (options, args) = parser.parse_args()    
 
-    fname = os.path.expanduser(input_routes_fname)
-    input_routes_shp = osgeo.ogr.Open(fname, 0)
+    if options.inputroutes is None:
+        parser.print_help()
+        parser.error("No routes shapefile path given.")
+    if options.outputsegments is None:
+        parser.print_help()
+        parser.error("No segments shapefile path given.")
+    if options.outputstops is None:
+        parser.print_help()
+        parser.error("No stops shapefile path given.")
+    if options.service is None:
+        parser.print_help()
+        parser.error("No service option requested. Should be one of %s" \
+            % (allowedServs))
+    if options.service not in m_t_info.settings:
+        parser.print_help()
+        parser.error("Service option requested '%s' not in allowed set, of %s" \
+            % (options.service, allowedServs))
+
+    mode_config = m_t_info.settings[options.service]
+
+    routes_fname = os.path.expanduser(options.inputroutes)
+    input_routes_shp = osgeo.ogr.Open(routes_fname, 0)
     if input_routes_shp is None:
         print "Error, input routes shape file given, %s , failed to open." \
-            % (input_routes_fname)
+            % (options.inputroutes)
         sys.exit(1)
     input_routes_lyr = input_routes_shp.GetLayer(0)    
+    routes_shp = osgeo.ogr.Open(routes_fname, 0)
+
+    # The other shape files we're going to create :- so don't check
+    #  existence, just read names.
+    stops_fname = os.path.expanduser(options.outputstops)
+    segments_fname = os.path.expanduser(options.outputsegments)
 
     transfer_networks_test = [
         ['./network_topology_testing/train_stop.shp', 350, 50, "TRANSFER_TRAIN"],
@@ -739,17 +772,17 @@ if __name__ == "__main__":
             nw_def_entry[2], nw_def_entry[3])
         transfer_networks_def.append(tf_nw_def)    
 
-    create_stops(input_routes_lyr, stops_shp_file_name,
+    create_stops(input_routes_lyr, stops_fname,
         transfer_networks_def)
 
-    fname = os.path.expanduser(stops_shp_file_name)
-    stops_shp = osgeo.ogr.Open(fname, 0)
+    stops_shp = osgeo.ogr.Open(stops_fname, 0)
     if stops_shp is None:
         print "Error, newly created stops shape file, %s , failed to open." \
             % (stops_shp_file_name)
         sys.exit(1)
     stops_lyr = stops_shp.GetLayer(0)   
+
     create_segments(input_routes_lyr, stops_lyr,
-        segments_shp_file_name, mode_config)
+        segments_fname, mode_config)
     input_routes_shp.Destroy()
     stops_shp.Destroy()    
