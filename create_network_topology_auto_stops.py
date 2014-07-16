@@ -6,6 +6,7 @@ import inspect
 import operator
 from optparse import OptionParser
 import math
+import csv
 
 import osgeo.ogr
 from osgeo import ogr, osr
@@ -29,14 +30,6 @@ MIN_DIST_TO_PLACE_ISECT_STOPS = 80.0
 
 class TransferNetworkDef:
     def __init__(self, shp_fname, tfer_range, stop_min_dist, stop_typ_name):
-        # 0: Path to network shape file
-        # 1: radial distance (m) from each stop to use for testing whether
-        # stops need to be added to the new network you're creating.
-        # I.E. 350 m means "make sure that within 350m of each stop on this
-        # existing network, stops are added to the new network.
-        # 2: Distance to check if there's an existing stop already added (m) -
-        # and if so, avoid.
-        # 3: Textual Name in the resulting shapefile you want to enter for
         self.shp_fname = shp_fname
         self.tfer_range = tfer_range
         self.stop_min_dist = stop_min_dist
@@ -509,8 +502,35 @@ def add_filler_stops(stops_lyr, input_routes_lyr, filler_dist,
     input_routes_lyr.ResetReading()
     return
 
+# Required format of the transfer network CSV file:
+# 0: Path to network shape file
+# 1: radial distance (m) from each stop to use for testing whether
+# stops need to be added to the new network you're creating.
+# I.E. 350 m means "make sure that within 350m of each stop on this
+# existing network, stops are added to the new network.
+# 2: Distance to check if there's an existing stop already added (m) -
+# and if so, avoid.
+# 3: Textual Name in the resulting shapefile you want to enter for
+
+def read_transfer_network_info(transfer_network_csv_fname):
+    csv_file = open(transfer_network_csv_fname, 'r')
+    if csv_file is None:
+        print "Error, transfer network CSV file given, %s , failed to open." \
+            % (csv_file_name)
+        sys.exit(1)
+    reader = csv.reader(csv_file, delimiter=',', quotechar="'") 
+    # skip headings
+    reader.next()
+    transfer_networks_def = []
+    for ii, row in enumerate(reader):
+        nw_def_entry = row
+        tf_nw_def = TransferNetworkDef(nw_def_entry[0], int(nw_def_entry[1]),
+            int(nw_def_entry[2]), nw_def_entry[3])
+        transfer_networks_def.append(tf_nw_def) 
+    return transfer_networks_def
+
 def create_stops(input_routes_lyr, stops_shp_file_name,
-        transfer_networks, filler_dist):
+        transfer_networks_def, filler_dist):
     stops_shp_file, stops_lyr = tp_model.create_stops_shp_file(
         stops_shp_file_name, delete_existing=DELETE_EXISTING)
     # We'll use this multipoint for calculating distances more easily
@@ -533,6 +553,8 @@ if __name__ == "__main__":
         help='Shapefile of line routes.')
     parser.add_option('--stops', dest='outputstops',
         help='Shapefile of line stops to create.')
+    parser.add_option('--transfers', dest='inputtransfers',
+        help='CSV File specifying transfer network info.')
     parser.add_option('--filler_dist', dest='filler_dist',
         help="Max distance used (m) in calc. when to add filler stops.")
     parser.set_defaults(filler_dist=DEFAULT_FILLER_DIST)
@@ -544,6 +566,9 @@ if __name__ == "__main__":
     if options.outputstops is None:
         parser.print_help()
         parser.error("No stops shapefile path given.")
+    if options.inputtransfers is None:
+        parser.print_help()
+        parser.error("No transfers CSV file path given.")
 
     routes_fname = os.path.expanduser(options.inputroutes)
     input_routes_shp = osgeo.ogr.Open(routes_fname, 0)
@@ -558,20 +583,17 @@ if __name__ == "__main__":
     #  existence, just read names.
     stops_fname = os.path.expanduser(options.outputstops)
 
-    transfer_networks_test = [
-        ['./network_topology_testing/train_stop.shp', 350, 50, "TRANSFER_TRAIN"],
-        # ['motorway_bus_stops.shp', 350m, 50m, "TRANSFER_MWAY_BUS"],
-        ['./network_topology_testing/tram_stop.shp', 300, 180, "TRANSFER_TRAM"],
-        ]
-
-    transfer_networks_def = []
-    for nw_def_entry in transfer_networks_test:
-        tf_nw_def = TransferNetworkDef(nw_def_entry[0], nw_def_entry[1],
-            nw_def_entry[2], nw_def_entry[3])
-        transfer_networks_def.append(tf_nw_def)    
+    tfer_network_csv_fname = os.path.expanduser(options.inputtransfers)
+    tfer_networks_def = read_transfer_network_info(tfer_network_csv_fname)
+    print "Transfer network defs read from file %s were:" % \
+        (tfer_network_csv_fname)
+    for tfer_nw_def in tfer_networks_def:
+        print "File '%s': range %d, min dist %d, output type '%s'" % \
+            (tfer_nw_def.shp_fname, tfer_nw_def.tfer_range, \
+             tfer_nw_def.stop_min_dist, tfer_nw_def.stop_typ_name)
 
     create_stops(input_routes_lyr, stops_fname,
-        transfer_networks_def, options.filler_dist)
+        tfer_networks_def, options.filler_dist)
 
     # Cleanup
     input_routes_shp.Destroy()
