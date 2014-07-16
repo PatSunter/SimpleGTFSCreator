@@ -29,6 +29,65 @@ STOP_ID_FIELD = "gid"               # int, 10
 STOP_NAME_FIELD = "ID"              # int, 10
 STOP_TYPE_FIELD = "typ"             # str, 50 - reasonable length type strs.
 
+ON_MOTORWAY_FIELD = 'mway'
+
+
+#################
+# Low-level functions to add new fields or check required ones exist.
+def check_field_exists(lyr_defn, field_name):
+    field_match = False
+    field_i = None
+    for field_i in range(lyr_defn.GetFieldCount()):
+        if lyr_defn.GetFieldDefn(field_i).GetName() == field_name:
+            field_match = True
+            break;
+    if field_match:
+        return True, field_i
+    else:
+        return False, None
+
+def check_field_props(lyr_defn, field_i, req_type_code, min_width,
+        min_precision=None):
+    f_defn = lyr_defn.GetFieldDefn(field_i)
+    # Check type etc is correct
+    f_type_code = f_defn.GetType()
+    f_width = f_defn.GetWidth()
+    f_precision = f_defn.GetPrecision()
+    if f_type_code == req_type_code and f_width >= min_width:
+        if min_precision is None:
+            return True
+        elif f_precision >= min_precision:
+            return True
+        else:
+            return False
+    else:
+        return False
+
+def ensure_field_exists(route_segments_lyr, field_name, field_type_code,
+        field_width, field_precision=None):
+    lyr_defn = route_segments_lyr.GetLayerDefn()
+    field_exists, field_i = check_field_exists(lyr_defn, field_name)
+    if field_exists == True:
+        ok_props = check_field_props(lyr_defn, field_i, field_type_code,
+            field_width, field_precision)
+        if not ok_props:
+            print "Error: field '%s' exists, but badly defined - deleting, "\
+                "will re-create." % (field_name)
+            route_segments_lyr.DeleteField(field_i)
+            field_exists = False
+    if field_exists == False:
+        print "Creating new field '%s'." % field_name
+        f_defn = ogr.FieldDefn(field_name, field_type_code)
+        f_defn.SetWidth(field_width)
+        if field_precision:
+            f_defn.SetPrecision(field_precision)
+        route_segments_lyr.CreateField(f_defn)
+
+
+#################
+# Functions to build Python lookup tables (dicts) into sets of all stops
+#  and segments, to allow fast access to them by integer ID.
+
 def build_stops_lookup_table(stops_lyr):
     """Given a layer of stops, creates a 'lookup table' dict where 
     keys are stop IDs, and values are ptrs to individual features.
@@ -61,6 +120,9 @@ def build_segs_lookup_table(route_segments_lyr):
         lookup_dict[int(seg_id)] = feature
     route_segments_lyr.ResetReading()
     return lookup_dict
+
+###########################################################
+# Access functions for key properties of segment-stop info
 
 def get_distance_km(seg_feature):
     rdist = float(seg_feature.GetField(SEG_ROUTE_DIST_FIELD))
@@ -108,6 +170,7 @@ def get_other_stop_name(segment, stop_name):
         return stop_name_a
 
 ################
+# Section below related to adding stops, routes, segments to shapefiles.
 
 def create_stops_shp_file(stops_shp_file_name, delete_existing=False):
     """Creates an empty stops shapefile. Returns the newly created shapefile,
