@@ -105,7 +105,7 @@ def advance_along_route_to_loc(route_geom, segs_iterator, loc):
         if (cur_dist < VERY_NEAR_LINE) or \
                 (within_seg and cur_dist < DIST_FOR_MATCHING_STOPS_ON_ROUTES):
             # The first clause in this loop is necessary for start and end
-            # points of route possibly now quite being classed as 'within
+            # points of route possibly not quite being classed as 'within
             # a segment'
             start_stop_proj_onto_route = intersection_point
             break
@@ -148,9 +148,13 @@ def get_next_stop_and_dist(route_geom, current_loc_on_route,
                 intersection_point, within_seg, uval = intersect_point_to_line(
                     stop_pt, seg_start, seg_end)
                 cur_dist = magnitude(stop_pt, intersection_point)
-                # See comment in above loop re this 2-clause test.
-                if (cur_dist < VERY_NEAR_LINE) or \
-                        (within_seg and cur_dist < DIST_FOR_MATCHING_STOPS_ON_ROUTES):
+                # Pat S, 13/6/2014: simplified this If statement to not also
+                # test 'within_seg' as this was causing probs for boundary
+                # cases. Thus now, even stops slightly beyond the start and
+                # end of route will match, as long as within range. But this
+                # seems OK in terms of the spirit of geometric matching of
+                # this algorithm.
+                if cur_dist < DIST_FOR_MATCHING_STOPS_ON_ROUTES:
                     dist_isect_from_seg_start = magnitude(seg_start,
                         intersection_point)
                     if dist_isect_from_seg_start < min_stop_isect_from_seg_start:
