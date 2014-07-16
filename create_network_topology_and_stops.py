@@ -15,6 +15,8 @@ import project_onto_line as lineargeom
 import topology_shapefile_data_model as tp_model
 import route_segs
 
+COMPARISON_EPSG = 28355
+
 class TransferNetworkDef:
     def __init__(self, shp_fname, tfer_range, stop_min_dist, stop_typ_name):
         # 0: Path to network shape file
@@ -567,10 +569,14 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
     route_seg_refs = []
     routes_srs = input_routes_lyr.GetSpatialRef()
     stops_srs = input_stops_lyr.GetSpatialRef()
+    target_srs = osr.SpatialReference()
+    target_srs.ImportFromEPSG(COMPARISON_EPSG)
 
     # First, get a multipoint in right projection.
     stops_multipoint = build_multipoint_from_lyr(input_stops_lyr)
-    reproject_all_multipoint(stops_multipoint, routes_srs)
+    reproject_all_multipoint(stops_multipoint, target_srs)
+
+    route_transform = osr.CoordinateTransformation(routes_srs, target_srs)
 
     print "Building route segment ref. infos:"
     for ii, route in enumerate(input_routes_lyr):
@@ -578,11 +584,11 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
         start_cnt = len(all_seg_refs)
         new_segs_cnt = 0
         seg_refs_this_route = []
-        #if rname not in ['R103', 'R104', 'R105', 'R110']: continue
-        #if rname not in ['R27']: continue
         print "Creating route segments infos for route %s" % rname
         # Get the stops of interest along route, we need to 'walk'
         route_geom = route.GetGeometryRef()
+        # Do a transform now for comparison purposes - before creating buffer
+        route_geom.Transform(route_transform)
         route_buffer = route_geom.Buffer(
             lineargeom.DIST_FOR_MATCHING_STOPS_ON_ROUTES)
         stops_near_route, isect_map = get_multipoint_within_with_map(
