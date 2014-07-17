@@ -12,6 +12,7 @@ from math import radians, cos, sin, asin, sqrt
 import osgeo.ogr
 from osgeo import ogr, osr
 
+import parser_utils
 import topology_shapefile_data_model as tp_model
 
 # All of these distances are in meters. Will project into
@@ -27,9 +28,6 @@ ON_POINT_CHECK_DIST = 0.01
     #  (see http://spatialreference.org/ref/epsg/gda94-mga-zone-55/)
 COMPARISON_EPSG = 28355
 
-def str2bool(v):
-    return v.lower() in ("yes", "true", "t", "1")
- 
 def get_route_num_from_feature(route):
     return int(route.GetField(tp_model.ROUTE_NAME_FIELD)[1:])
 
@@ -334,7 +332,7 @@ if __name__ == "__main__":
         parser.print_help()
         parser.error("No stops shapefile path given.")
 
-    update_choice = str2bool(options.update)
+    update_choice = parser_utils.str2bool(options.update)
     route_num_choice = options.route
 
     # Open segments in write-able mode, hence the 1 below. Others read-only

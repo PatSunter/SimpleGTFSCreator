@@ -22,6 +22,7 @@ import transitfeed
 import mode_timetable_info as m_t_info
 import topology_shapefile_data_model as tp_model
 import route_segs
+import parser_utils
 
 # Will determine how much infor is printed.
 VERBOSE = False
@@ -499,9 +500,6 @@ def process_data(route_defs_csv_fname, input_segments_fname,
     schedule.Validate()
     schedule.WriteGoogleTransitFeed(output)
 
-def str2bool(v):
-    return v.lower() in ("yes", "true", "t", "1")
-
 if __name__ == "__main__":
 
     parser = OptionParser()
@@ -533,7 +531,7 @@ if __name__ == "__main__":
         parser.print_help()
         parser.error("Need to specify a service.")
 
-    use_seg_speeds = str2bool(options.usesegspeeds)
+    use_seg_speeds = parser_utils.str2bool(options.usesegspeeds)
 
     mode_config = m_t_info.settings[options.service]
 
