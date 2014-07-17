@@ -21,6 +21,15 @@ def pairs(lst, loop=False):
     if loop == True:
         yield item, first
 
+def reverse_pairs(lst, loop=False):
+    i = reversed(lst)
+    first = prev = i.next()
+    for item in i:
+        yield prev, item
+        prev = item
+    if loop == True:
+        yield item, first
+
 # these methods rewritten from the C version of Paul Bourke's
 # geometry computations:
 # http://local.wasp.uwa.edu.au/~pbourke/geometry/pointline/
@@ -89,7 +98,7 @@ def nearest_point_on_polyline_to_point(polyline, point):
             nearest_point = intersection_point
     return nearest_point, min_dist
 
-def advance_along_route_to_loc(route_geom, segs_iterator, loc):
+def advance_along_route_to_loc(segs_iterator, loc):
     # This first section is to skip ahead to correct segment and project
     # starting location onto line itself. So we need to create the iterator
     # outside the for statement to use in 2nd loop.
@@ -126,7 +135,7 @@ def get_next_stop_and_dist(route_geom, current_loc_on_route,
 
     segs_iterator = pairs(route_geom.GetPoints())
     start_stop_proj_onto_route, seg_start, seg_end = advance_along_route_to_loc(
-        route_geom, segs_iterator, start_pt)
+        segs_iterator, start_pt)
     # Now we are going to walk thru remaining segments, and keep testing
     # remaining stops till we find one on the current segment.
     linear_dist_from_start_stop = 0
@@ -174,11 +183,20 @@ def get_next_stop_and_dist(route_geom, current_loc_on_route,
     return next_stop_on_route_isect, next_stop_on_route_ii, linear_dist_from_start_stop
 
 def move_dist_along_route(route_geom, current_loc, dist_along_route):
-    rem_dist = dist_along_route
+    segs_iterator = None
+    rem_dist = 0
+    if dist_along_route == 0:
+        return current_loc
+    elif dist_along_route > 0:
+        rem_dist = dist_along_route
+        segs_iterator = pairs(route_geom.GetPoints())
+    else:
+        # Flip directions.
+        rem_dist = -dist_along_route
+        segs_iterator = reverse_pairs(route_geom.GetPoints())
     # Get to current location
-    segs_iterator = pairs(route_geom.GetPoints())
     start_loc_proj_onto_route, seg_start, seg_end = advance_along_route_to_loc(
-        route_geom, segs_iterator, current_loc)
+        segs_iterator, current_loc)
     # Keep walking remaining segs until req. distance travelled.    
     # Special case for start of below loop :- consider "seg_start" as our
     # starting location.
@@ -195,5 +213,5 @@ def move_dist_along_route(route_geom, current_loc, dist_along_route):
     except StopIteration:
         # Means we've walked the whole route, so just move to the end of final
         # segment.
-        new_loc = seg_end    
+        new_loc = seg_end
     return new_loc
