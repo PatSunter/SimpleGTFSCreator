@@ -220,10 +220,12 @@ def calc_all_route_segment_lengths(route, segments_lyr, stops_lyr,
 
     # First we will sub-select stops, only based on those around route
     route_geom = route.GetGeometryRef()
-    route_buffer = route_geom.Buffer(STOP_ON_ROUTE_CHECK_DIST)
-    src_srs = route_geom.GetSpatialReference()
-    target_srs = stops_lyr.GetSpatialRef()
-    transform = osr.CoordinateTransformation(src_srs, target_srs)
+    # Use a safety factor in buffer, for stops maybe right on margin
+    #  especially as we're transforming into stops layer EPSG.
+    route_buffer = route_geom.Buffer(STOP_ON_ROUTE_CHECK_DIST*1.5)
+    routes_srs = route_geom.GetSpatialReference()
+    stops_srs = stops_lyr.GetSpatialRef()
+    transform = osr.CoordinateTransformation(routes_srs, stops_srs)
     route_buffer.Transform(transform)
     stops_lyr.SetSpatialFilter(route_buffer)
 
