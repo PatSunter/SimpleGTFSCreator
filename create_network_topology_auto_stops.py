@@ -17,6 +17,7 @@ import topology_shapefile_data_model as tp_model
 import mode_timetable_info as m_t_info
 
 DEFAULT_FILLER_DIST = 500
+MAX_FILLER_DIST = 100000
 
 DELETE_EXISTING = True
 
@@ -434,12 +435,22 @@ def add_filler_stops(stops_lyr, input_routes_lyr, filler_dist,
     src_srs = input_routes_lyr.GetSpatialRef()
     for ii, route in enumerate(input_routes_lyr):
         rname = route.GetField(0)
-        print "Adding Filler stops for route %s" % rname
         route_geom = route.GetGeometryRef()
+        route_length_total = route_geom.Length()
+        print "Adding Filler stops for route %s (%.1fm length)" % \
+            (rname, route_length_total)
         # First, get the stops of interest along route, we need to 'walk'
         route_buffer = route_geom.Buffer(
             lineargeom.DIST_FOR_MATCHING_STOPS_ON_ROUTES)
         stops_near_route = stops_multipoint.Intersection(route_buffer)
+        # In cases of just one point, this will return a Point, rather than
+        # Multipoint. So need to convert for latter parts of alg.
+        if stops_near_route.GetGeometryName() == "POINT":
+            assert stops_near_route.GetPointCount() == 1
+            near_route_multipoint = ogr.Geometry(ogr.wkbMultiPoint)
+            near_route_multipoint.AddGeometry(stops_near_route)
+            stops_near_route.Destroy()
+            stops_near_route = near_route_multipoint
         rem_stop_is = range(stops_near_route.GetGeometryCount())
         # Now walk the route, adding fillers when needed
         start_coord = route_geom.GetPoint(0)
@@ -448,8 +459,10 @@ def add_filler_stops(stops_lyr, input_routes_lyr, filler_dist,
         end_vertex = ogr.Geometry(ogr.wkbPoint)
         end_vertex.AddPoint(*end_coord)
 
+        route_length_processed = 0
         line_remains = True
         stops_found = 0
+        filler_stops_added = 0
         last_stop_i_along_route = None
         next_stop_i_along_route = None
         while line_remains is True:
@@ -464,7 +477,7 @@ def add_filler_stops(stops_lyr, input_routes_lyr, filler_dist,
             if filler_incs > 0:
                 walk_dist_to_filler = dist_to_next / float(filler_incs+1)
                 #print "..adding %03d filler stops between stops %02s and "\
-                #    "%02s (route length %.1fm, filler dist %.1fm)" %\
+                #    "%02s (route section length %.1fm, filler dist %.1fm)" %\
                 #    (filler_incs, last_stop_i_along_route, \
                 #     next_stop_i_along_route, dist_to_next, \
                 #     walk_dist_to_filler)
@@ -477,28 +490,28 @@ def add_filler_stops(stops_lyr, input_routes_lyr, filler_dist,
                     #    (current_loc[0], current_loc[1])
                     stop_id = tp_model.add_stop(stops_lyr, stops_multipoint,
                         filler_stop_type, filler_geom, src_srs)
+                    filler_stops_added += 1    
             # Walk ahead.
             current_loc = next_stop_on_route_isect
             last_stop_i_along_route = next_stop_i_along_route
-            #curr_loc_pt = ogr.Geometry(ogr.wkbPoint)
-            #curr_loc_pt.AddPoint(*current_loc)
-            #dist_to_end = curr_loc_pt.Distance(end_vertex)
-            #curr_loc_pt.Destroy()
-            if next_stop_on_route_isect is None or len(rem_stop_is) == 0:
-            #        Comment out this dist_to_end test - case of looped routes
-            #        or dist_to_end < lineargeom.SAME_POINT:
+            route_length_processed += dist_to_next
+            route_remaining = route_length_total - route_length_processed
+            if (next_stop_on_route_isect is None or len(rem_stop_is) == 0) and \
+                (route_remaining < lineargeom.SAME_POINT):
                 # We've added fillers to the last section, so all done.
                 assert len(rem_stop_is) == 0
                 line_remains = False
                 break
-        if stops_found <= 1:
+        if stops_found < 1:
             print "*WARNING*: while adding filler stops to route '%s', only "\
                 "found %d existing stops. Normally expect to process at "\
-                "least 2 (a start and end stop for the route.)"\
+                "least 1 (a start-end stop for a looped route.)"\
                 % (rname, stops_found)
         route_buffer.Destroy()
         stops_near_route.Destroy()
         end_vertex.Destroy()
+        print "..added %d filler stops between the %d existing stops "\
+            "detected for this route." % (filler_stops_added, stops_found)
     input_routes_lyr.ResetReading()
     return
 
@@ -557,7 +570,7 @@ if __name__ == "__main__":
         help='CSV File specifying transfer network info.')
     parser.add_option('--filler_dist', dest='filler_dist',
         help="Max distance used (m) in calc. when to add filler stops.")
-    parser.set_defaults(filler_dist=DEFAULT_FILLER_DIST)
+    parser.set_defaults(filler_dist=str(DEFAULT_FILLER_DIST))
     (options, args) = parser.parse_args()
 
     if options.inputroutes is None:
@@ -569,6 +582,19 @@ if __name__ == "__main__":
     if options.inputtransfers is None:
         parser.print_help()
         parser.error("No transfers CSV file path given.")
+
+    try:
+        filler_dist = float(options.filler_dist)
+    except ValueError:
+        parser.print_help()
+        parser.error("Invalid filler_dist option specified (%s). filler_dist "\
+            "must be a float between 0 and %d meters." % \
+            (options.filler_dist, MAX_FILLER_DIST))
+    if filler_dist < 0 or filler_dist > MAX_FILLER_DIST:
+        parser.print_help()
+        parser.error("Invalid filler_dist option specified (%s). filler_dist "\
+            "must be between 0 and %d meters." % \
+            (options.filler_dist, MAX_FILLER_DIST))
 
     routes_fname = os.path.expanduser(options.inputroutes)
     input_routes_shp = osgeo.ogr.Open(routes_fname, 0)
@@ -593,7 +619,7 @@ if __name__ == "__main__":
              tfer_nw_def.stop_min_dist, tfer_nw_def.stop_typ_name)
 
     create_stops(input_routes_lyr, stops_fname,
-        tfer_networks_def, options.filler_dist)
+        tfer_networks_def, filler_dist)
 
     # Cleanup
     input_routes_shp.Destroy()
