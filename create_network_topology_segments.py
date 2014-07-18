@@ -9,13 +9,11 @@ from optparse import OptionParser
 import osgeo.ogr
 from osgeo import ogr, osr
 
-import route_geom_ops as lineargeom
+import route_geom_ops
 import topology_shapefile_data_model as tp_model
 import route_segs
 
 import mode_timetable_info as m_t_info
-
-COMPARISON_EPSG = 28355
 
 DELETE_EXISTING = True
 
@@ -62,7 +60,7 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
     routes_srs = input_routes_lyr.GetSpatialRef()
     stops_srs = input_stops_lyr.GetSpatialRef()
     target_srs = osr.SpatialReference()
-    target_srs.ImportFromEPSG(COMPARISON_EPSG)
+    target_srs.ImportFromEPSG(route_geom_ops.COMPARISON_EPSG)
 
     # First, get a multipoint in right projection.
     stops_multipoint = build_multipoint_from_lyr(input_stops_lyr)
@@ -82,7 +80,7 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
         # Do a transform now for comparison purposes - before creating buffer
         route_geom.Transform(route_transform)
         route_buffer = route_geom.Buffer(
-            lineargeom.STOP_ON_ROUTE_CHECK_DIST)
+            route_geom_ops.STOP_ON_ROUTE_CHECK_DIST)
         stops_near_route, isect_map = get_multipoint_within_with_map(
             stops_multipoint, route_buffer)
         if stops_near_route.GetGeometryCount() == 0:
@@ -103,7 +101,7 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
         next_stop_i_in_route_set = None
         while line_remains is True:
             next_stop_on_route_isect, stop_ii, dist_to_next = \
-                lineargeom.get_next_stop_and_dist(route_geom, current_loc,
+                route_geom_ops.get_next_stop_and_dist(route_geom, current_loc,
                     stops_near_route, rem_stop_is)
             if next_stop_on_route_isect is None:
                 # No more stops detected - Finish.
@@ -135,11 +133,11 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
                 last_stop.Destroy()
                 next_stop.Destroy()
             else:
-                if dist_to_next > lineargeom.STOP_ON_ROUTE_CHECK_DIST:
+                if dist_to_next > route_geom_ops.STOP_ON_ROUTE_CHECK_DIST:
                     print "Warning: for route %s, first stop is %.1fm from "\
                         "start of route (>%.1fm)." % \
                         (rname, dist_to_next, \
-                        lineargeom.STOP_ON_ROUTE_CHECK_DIST)
+                        route_geom_ops.STOP_ON_ROUTE_CHECK_DIST)
             # Walk ahead.
             current_loc = next_stop_on_route_isect
             last_stop_i_along_route = next_stop_i_along_route
@@ -149,7 +147,7 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
             #dist_to_end = curr_loc_pt.Distance(end_vertex)
             #curr_loc_pt.Destroy()
             if next_stop_on_route_isect is None or len(rem_stop_is) == 0:
-            #        or dist_to_end < lineargeom.SAME_POINT:
+            #        or dist_to_end < route_geom_ops.SAME_POINT:
                 assert len(rem_stop_is) == 0
                 line_remains = False
                 break
