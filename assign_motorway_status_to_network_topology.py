@@ -10,6 +10,7 @@ import osgeo.ogr
 from osgeo import ogr, osr
 
 import topology_shapefile_data_model as tp_model
+import route_geom_ops
 import motorway_calcs
 
 def record_if_on_motorway(route_segment, route_segments_lyr,
@@ -23,21 +24,29 @@ def record_if_on_motorway(route_segment, route_segments_lyr,
     route_segments_lyr.SetFeature(route_segment)
 
 def assign_mway_status(route_segments_shp, mways_shp):
-    print "Assigning motorway status to all route segments:"
     route_segments_lyr = route_segments_shp.GetLayer(0)
+    segs_total = route_segments_lyr.GetFeatureCount()
     motorway_calcs.ensure_motorway_field_exists(route_segments_lyr)
 
     target_srs = osr.SpatialReference()
-    target_srs.ImportFromEPSG(motorway_calcs.COMPARISON_EPSG)
+    target_srs.ImportFromEPSG(route_geom_ops.COMPARISON_EPSG)
 
     mways_lyr = mways_shp.GetLayer(0)
-    mways_buffer_geom = motorway_calcs.create_motorways_buffer(mways_lyr, target_srs)
+    mways_buffer_geom = motorway_calcs.create_motorways_buffer(mways_lyr,
+        target_srs)
     route_segs_srs = route_segments_lyr.GetSpatialRef()
     route_seg_transform = osr.CoordinateTransformation(route_segs_srs, target_srs)
 
+    print "Assigning motorway status to all %d route segments:" % \
+        (segs_total)
+    one_tenth = segs_total / 10.0
+    segs_since_print = 0
     for seg_num, route_segment in enumerate(route_segments_lyr):
-        if seg_num % 100 == 0:
+        if segs_since_print / one_tenth > 1:
             print "...assigning to segment number %d ..." % (seg_num)
+            segs_since_print = 0
+        else:
+            segs_since_print += 1
         record_if_on_motorway(route_segment, route_segments_lyr,
             mways_buffer_geom, route_seg_transform)
         # Memory mgt

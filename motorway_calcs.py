@@ -3,9 +3,9 @@ from osgeo import ogr, osr
 
 import mode_timetable_info as m_t_info
 import topology_shapefile_data_model as tp_model
-import project_onto_line as lineargeom
+import route_geom_ops
 
-COMPARISON_EPSG = 28355
+# Values below in m - see route_geom_ops.COMPARISON_EPSG
 # Put a _lot_ of leeway here, for stops that were added just off off-ramps
 # etc.
 STOP_NEAR_MOTORWAY_CHECK_DIST = 30
@@ -58,7 +58,7 @@ def stop_on_motorway(input_geom, route_geom, mways_buffer_geom,
         all_within_before = True
         for ii in range(1, ALONG_ROUTE_EITHER_SIDE_CHECK_NUM+1):
             dist = ii * -inc
-            before_pt = lineargeom.move_dist_along_route(route_geom,
+            before_pt = route_geom_ops.move_dist_along_route(route_geom,
                 current_loc, dist)
             before_geom = ogr.Geometry(ogr.wkbPoint)
             before_geom.AddPoint(*before_pt)
@@ -74,7 +74,7 @@ def stop_on_motorway(input_geom, route_geom, mways_buffer_geom,
            all_within_after = True
            for ii in range(1, ALONG_ROUTE_EITHER_SIDE_CHECK_NUM+1):
                dist = ii * inc
-               after_pt = lineargeom.move_dist_along_route(route_geom,
+               after_pt = route_geom_ops.move_dist_along_route(route_geom,
                    current_loc, dist)
                after_geom = ogr.Geometry(ogr.wkbPoint)
                after_geom.AddPoint(*after_pt)

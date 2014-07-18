@@ -9,7 +9,7 @@ from optparse import OptionParser
 import osgeo.ogr
 from osgeo import ogr, osr
 
-import project_onto_line as lineargeom
+import route_geom_ops as lineargeom
 import topology_shapefile_data_model as tp_model
 import route_segs
 
@@ -82,7 +82,7 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
         # Do a transform now for comparison purposes - before creating buffer
         route_geom.Transform(route_transform)
         route_buffer = route_geom.Buffer(
-            lineargeom.DIST_FOR_MATCHING_STOPS_ON_ROUTES)
+            lineargeom.STOP_ON_ROUTE_CHECK_DIST)
         stops_near_route, isect_map = get_multipoint_within_with_map(
             stops_multipoint, route_buffer)
         if stops_near_route.GetGeometryCount() == 0:
@@ -135,11 +135,11 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
                 last_stop.Destroy()
                 next_stop.Destroy()
             else:
-                if dist_to_next > lineargeom.DIST_FOR_MATCHING_STOPS_ON_ROUTES:
+                if dist_to_next > lineargeom.STOP_ON_ROUTE_CHECK_DIST:
                     print "Warning: for route %s, first stop is %.1fm from "\
                         "start of route (>%.1fm)." % \
                         (rname, dist_to_next, \
-                        lineargeom.DIST_FOR_MATCHING_STOPS_ON_ROUTES)
+                        lineargeom.STOP_ON_ROUTE_CHECK_DIST)
             # Walk ahead.
             current_loc = next_stop_on_route_isect
             last_stop_i_along_route = next_stop_i_along_route

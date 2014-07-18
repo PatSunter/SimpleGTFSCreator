@@ -13,11 +13,7 @@ from osgeo import ogr, osr
 import mode_timetable_info as m_t_info
 import topology_shapefile_data_model as tp_model
 import motorway_calcs
-
-# Chose EPSG:28355 ("GDA94 / MGA zone 55") as an appropriate projected
-    # spatial ref. system, in meters, for the Melbourne region.
-    #  (see http://spatialreference.org/ref/epsg/gda94-mga-zone-55/)
-COMPARISON_EPSG = 28355
+import route_geom_ops
 
 def ensure_speed_field_exists(route_segments_lyr, speed_field_name):
     tp_model.ensure_field_exists(route_segments_lyr, speed_field_name,
@@ -30,13 +26,19 @@ def assign_speed_to_seg(route_segments_lyr, route_segment, speed_field_name, spe
     route_segments_lyr.SetFeature(route_segment)
 
 def assign_speeds(route_segments_shp, mode_config, speed_func, speed_field_name):
-    print "Assigning speed to all route segments:"
     route_segments_lyr = route_segments_shp.GetLayer(0)
     ensure_speed_field_exists(route_segments_lyr, speed_field_name)
 
+    segs_total = route_segments_lyr.GetFeatureCount()
+    print "Assigning speed to all %d route segments:" % segs_total
+    one_tenth = segs_total / 10.0
+    segs_since_print = 0
     for seg_num, route_segment in enumerate(route_segments_lyr):
-        if seg_num % 100 == 0:
+        if segs_since_print / one_tenth > 1:
             print "...assigning to segment number %d ..." % (seg_num)
+            segs_since_print = 0
+        else:
+            segs_since_print += 1
         speed = speed_func(route_segment, mode_config)
         assign_speed_to_seg(route_segments_lyr, route_segment,
             speed_field_name, speed)
@@ -140,7 +142,7 @@ def calc_peak_speed_melb_bus(route_segment, mode_config):
     assert mode_config['system'] == 'Bus'
 
     target_srs = osr.SpatialReference()
-    target_srs.ImportFromEPSG(COMPARISON_EPSG)
+    target_srs.ImportFromEPSG(route_geom_ops.COMPARISON_EPSG)
 
     seg_geom = route_segment.GetGeometryRef()
     segment_srs = seg_geom.GetSpatialReference()

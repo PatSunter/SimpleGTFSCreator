@@ -7,71 +7,20 @@ import inspect
 import operator
 from optparse import OptionParser
 
-from math import radians, cos, sin, asin, sqrt
-
 import osgeo.ogr
 from osgeo import ogr, osr
 
 import parser_utils
 import topology_shapefile_data_model as tp_model
+import route_geom_ops
+import lineargeom
 
 # All of these distances are in meters. Will project into
 # chosen EPSG for testing, so set it appropriate to your region.
-#STOP_ON_ROUTE_CHECK_DIST = 0.1
-# Found some cases of 1m, so up to 5m here.
-STOP_ON_ROUTE_CHECK_DIST = 5
-ON_LINE_CHECK_DIST = 0.1
 ON_POINT_CHECK_DIST = 0.01
-
-# Chose EPSG:28355 ("GDA94 / MGA zone 55") as an appropriate projected
-    # spatial ref. system, in meters, for the Melbourne region.
-    #  (see http://spatialreference.org/ref/epsg/gda94-mga-zone-55/)
-COMPARISON_EPSG = 28355
 
 def get_route_num_from_feature(route):
     return int(route.GetField(tp_model.ROUTE_NAME_FIELD)[1:])
-
-# Note:- could possibly also use the shapely length function, or 
-# geopy has a Vincenty Distance implementation
-# see:- http://gis.stackexchange.com/questions/4022/looking-for-a-pythonic-way-to-calculate-the-length-of-a-wkt-linestring
-def haversine(lon1, lat1, lon2, lat2):
-    """
-     Calculate the great circle distance between two points 
-     on the earth (specified in decimal degrees) - return in metres
-    """
-    # convert decimal degrees to radians 
-    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
-    # haversine formula 
-    dlon = lon2 - lon1 
-    dlat = lat2 - lat1 
-    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
-    c = 2 * asin(sqrt(a)) 
-    km = 6367 * c
-    metres = km * 1000
-    return metres 
-
-def calc_length_along_line_haversine(line_geom):
-    line_lat_lon = ogr.Geometry(ogr.wkbLineString)
-    src_srs = line_geom.GetSpatialReference()
-    target_srs = osr.SpatialReference()
-    target_srs.ImportFromEPSG(4326)
-    transform = osr.CoordinateTransformation(src_srs, target_srs)
-    for pt in line_geom.GetPoints():
-        line_lat_lon.AddPoint(*pt)
-    line_lat_lon.Transform(transform)
-    #print line_lat_lon.GetPoints()    
-    total_metres = 0    
-    line_ii = 0
-    pt_count = line_lat_lon.GetPointCount()
-    #print "Calculating haversine length:"
-    while line_ii+1 < pt_count:
-        pt_a = line_lat_lon.GetPoint(line_ii)
-        pt_b = line_lat_lon.GetPoint(line_ii+1)
-        section_metres = haversine(pt_a[0], pt_a[1], pt_b[0], pt_b[1])
-        total_metres += section_metres
-        #print "...added %f metres." % section_metres
-        line_ii += 1
-    return total_metres
 
 def calc_distance(route, stops):
     """Calculate the linear distance along a route, between two stops."""
@@ -84,7 +33,7 @@ def calc_distance(route, stops):
     #print "Stop coords are: %s" % (stop_coords)
 
     target_srs = osr.SpatialReference()
-    target_srs.ImportFromEPSG(COMPARISON_EPSG)
+    target_srs.ImportFromEPSG(route_geom_ops.COMPARISON_EPSG)
 
     stop_points_tform = []
     stop_coords_tform = []
@@ -119,7 +68,7 @@ def calc_distance(route, stops):
                     dist = next_seg.Distance(stop_point)
                     if dist < min_dist_to_sec[stop_ii]:
                         min_dist_to_sec[stop_ii] = dist
-                    if dist <= STOP_ON_ROUTE_CHECK_DIST:
+                    if dist <= route_geom_ops.STOP_ON_ROUTE_CHECK_DIST:
                         on_sections[stop_ii] = (ver_ii, ver_ii+1)
         if None not in on_sections:
             #Finish early if we can.
@@ -182,7 +131,7 @@ def calc_distance(route, stops):
     #print subline.GetPoints()
     #length = subline.Length()
     #print "Length was %d meters." % round(length)
-    length = calc_length_along_line_haversine(subline)
+    length = lineargeom.calc_length_along_line_haversine(subline)
     return length
 
 def get_route(route_lyr, route_num):
@@ -222,7 +171,7 @@ def calc_all_route_segment_lengths(route, segments_lyr, stops_lyr,
     route_geom = route.GetGeometryRef()
     # Use a safety factor in buffer, for stops maybe right on margin
     #  especially as we're transforming into stops layer EPSG.
-    route_buffer = route_geom.Buffer(STOP_ON_ROUTE_CHECK_DIST*1.5)
+    route_buffer = route_geom.Buffer(route_geom_ops.STOP_ON_ROUTE_CHECK_DIST*1.5)
     routes_srs = route_geom.GetSpatialReference()
     stops_srs = stops_lyr.GetSpatialRef()
     transform = osr.CoordinateTransformation(routes_srs, stops_srs)
@@ -247,12 +196,19 @@ def calc_all_route_segment_lengths(route, segments_lyr, stops_lyr,
             if missing_stop: continue
             length = calc_single_route_segment_length(route, stops)
             prev_length = segment.GetField(tp_model.SEG_ROUTE_DIST_FIELD)
-            if prev_length == None or abs(length - prev_length) > 50:
+            rnd_length = round(length)
+            if prev_length > 0:
+                length_change_ratio = abs(rnd_length-prev_length)/prev_length 
+            else:
+                length_change_ratio = 0
+
+            if prev_length == None or (prev_length == 0 and rnd_length >= 1) or \
+                    length_change_ratio > 0.01:
                 print "Calculating length of segment %s (b/w stops %s - %s):"\
                     % (seg_id, s_id_a, s_id_b)
                 print "Rounded length calculated as %.1f m "\
-                    "(Prev stored: %s m)" % \
-                    (round(length), prev_length)
+                    "(Prev stored: %.1f m)" % \
+                    (rnd_length, prev_length)
             if update == True:
                 segment.SetField(tp_model.SEG_ROUTE_DIST_FIELD, round(length))
                 # This call necessary to actually save updated value to layer
