@@ -29,7 +29,7 @@ VERBOSE = False
 # Calc this once to save a bit of time as its used a lot
 TODAY = date.today()
 
-ROUTE_WRITE_BATCH_SIZE = 10
+ROUTE_WRITE_BATCH_SIZE = 20
 
 class Seq_Stop_Info:
     """A small struct to store key info about a stop in the sequence of a
@@ -484,9 +484,10 @@ def get_partial_save_name(output_fname, ii):
     return fname
 
 def process_data(route_defs_csv_fname, input_segments_fname,
-        input_stops_fname, mode_config, output, use_seg_speeds):
+        input_stops_fname, mode_config, output, use_seg_speeds,
+        memory_db):
     # Create our schedule
-    schedule = transitfeed.Schedule()
+    schedule = transitfeed.Schedule(memory_db=memory_db)
     # Agency
     schedule.AddAgency(mode_config['name'], mode_config['url'],
         mode_config['loc'], agency_id=mode_config['id'])
@@ -559,7 +560,11 @@ if __name__ == "__main__":
     parser.add_option('--usesegspeeds', dest='usesegspeeds', 
         help='Use per-segment speeds defined in route segments shapefile? '\
         'If false, then will just use a constant speed defined per mode.')
-    parser.set_defaults(output='google_transit.zip', usesegspeeds='false')
+    parser.add_option('--memorydb', dest='memorydb', 
+        help='Should the GTFS schedule use an in-memory DB, or file based one? '\
+        'creating large GTFS schedules can be memory-hungry.')
+    parser.set_defaults(output='google_transit.zip', usesegspeeds='True',
+        memorydb='False')
     (options, args) = parser.parse_args()
 
     if options.routedefs is None:
@@ -581,6 +586,7 @@ if __name__ == "__main__":
             % (options.service, allowedServs))
 
     use_seg_speeds = parser_utils.str2bool(options.usesegspeeds)
+    memory_db = parser_utils.str2bool(options.memorydb)
 
     mode_config = m_t_info.settings[options.service]
 
@@ -590,4 +596,5 @@ if __name__ == "__main__":
         os.path.expanduser(options.inputstops),
         mode_config,
         os.path.expanduser(options.output),
-        use_seg_speeds)
+        use_seg_speeds,
+        memory_db)
