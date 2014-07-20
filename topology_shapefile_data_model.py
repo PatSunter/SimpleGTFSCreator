@@ -31,6 +31,9 @@ STOP_TYPE_FIELD = "typ"             # str, 50 - reasonable length type strs.
 
 ON_MOTORWAY_FIELD = 'mway'
 
+STOP_TYPE_ROUTE_START_END = "ROUTE_START_END"
+STOP_TYPE_SELF_TFER = "TRANSFER_SELF"
+STOP_TYPE_FILLERS = "FILLERS"
 
 #################
 # Low-level functions to add new fields or check required ones exist.
