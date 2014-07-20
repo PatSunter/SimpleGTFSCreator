@@ -16,14 +16,10 @@ import topology_shapefile_data_model as tp_model
 import route_geom_ops
 import motorway_calcs
 
-DEFAULT_FILLER_DIST = 500
+DEFAULT_FILLER_DIST = 600
 MAX_FILLER_DIST = 100000
 
 DELETE_EXISTING = True
-
-ROUTE_START_END_NAME = "ROUTE_START_END"
-TRANSFER_SELF_NAME = "TRANSFER_SELF"
-FILLER_NAME = "FILLERS"
 
 BUFFER_DIST_SELF_ROUTE_TRANSFER = 30.0
 CROSSING_ANGLE_FACTOR = 0.01
@@ -39,9 +35,9 @@ class TransferNetworkDef:
         self.skip_on_mway = skip_on_mway
 
 def add_route_start_end_stops(stops_lyr, input_routes_lyr, stops_multipoint):
-    src_srs = input_routes_lyr.GetSpatialRef()
+    routes_srs = input_routes_lyr.GetSpatialRef()
     print "Adding route start and end stops...."
-    for ii, route in enumerate(input_routes_lyr):
+    for ri, route in enumerate(input_routes_lyr):
         route_geom = route.GetGeometryRef()
         #print "For route '%s':" % route.GetField(0)
         start_pt = ogr.Geometry(ogr.wkbPoint)
@@ -60,7 +56,7 @@ def add_route_start_end_stops(stops_lyr, input_routes_lyr, stops_multipoint):
                 pass
             else:
                 stop_id = tp_model.add_stop(stops_lyr, stops_multipoint,
-                    ROUTE_START_END_NAME, pt, src_srs)
+                    tp_model.STOP_TYPE_ROUTE_START_END, pt, routes_srs)
                 #print "...Adding stop at route start/end"
     input_routes_lyr.ResetReading()
     print "...done adding start and end stops."
@@ -82,7 +78,7 @@ def first_good_intersect_point(line_geom, other_line_geom,
         pts_list = list(reversed(pts_list))
     first_pt = ogr.Geometry(ogr.wkbPoint)
     first_pt.AddPoint(*pts_list[0])
-    for ii, pt_coords in enumerate(pts_list):
+    for pi, pt_coords in enumerate(pts_list):
         new_pt = ogr.Geometry(ogr.wkbPoint)
         new_pt.AddPoint(*pt_coords)
         dist_from_first_pt = new_pt.Distance(first_pt)
@@ -91,7 +87,7 @@ def first_good_intersect_point(line_geom, other_line_geom,
         dist_from_other = new_pt.Distance(other_line_geom) 
         if dist_from_other < nearest_dist:
             nearest_dist = dist_from_other
-            nearest_index = ii
+            nearest_index = pi
         if dist_from_other < route_geom_ops.VERY_NEAR_ROUTE:
             return pt_coords
     return None
@@ -132,16 +128,17 @@ def get_isect_points_of_interest(isect_line, other_route_geom):
             isect_pts_interest.append(end_pt)
     return isect_pts_interest
 
-def add_valid_intersection_stops(pt_coords, stops_lyr,
-        stops_multipoint, mways_buffer_geom, route_geom_transform,
-        route_geom, other_route_geom):
+def add_valid_intersection_stops(pt_coords, stops_lyr, stops_multipoint,
+        mways_isect_geom_route, mways_isect_geom_other_route,
+        route_geom_transform, route_geom, other_route_geom,
+        stops_multipoint_route_subset):
     stops_added_cnt = 0
     #print "Detected isect_self point at (%f, %f)" % pt_coords
     new_pt = ogr.Geometry(ogr.wkbPoint)
     new_pt.AddPoint(*pt_coords)
 
-    if mways_buffer_geom and motorway_calcs.stop_on_motorway(new_pt,
-            route_geom, mways_buffer_geom, route_geom_transform):
+    if mways_isect_geom_route and motorway_calcs.stop_on_motorway(new_pt,
+            route_geom, mways_isect_geom_route, route_geom_transform):
         # Skipping this point if on a motorway.
         #print "...but skipping since on a motorway."
         new_pt.Destroy()
@@ -149,7 +146,7 @@ def add_valid_intersection_stops(pt_coords, stops_lyr,
 
     min_dist_on_both_routes = sys.maxint
     min_dist_on_route = route_geom_ops.get_stops_already_on_route_within_dist(
-        new_pt, route_geom, stops_multipoint, 
+        new_pt, route_geom, stops_multipoint_route_subset, 
         MIN_DIST_TO_PLACE_ISECT_STOPS)
     for exist_stop_geom, dist_new in min_dist_on_route: 
         dist_other = exist_stop_geom.Distance(other_route_geom)
@@ -182,16 +179,17 @@ def add_valid_intersection_stops(pt_coords, stops_lyr,
     assert (dist_self < route_geom_ops.STOP_ON_ROUTE_CHECK_DIST)
 
     if (dist_other <= route_geom_ops.STOP_ON_ROUTE_CHECK_DIST):
-        if mways_buffer_geom and motorway_calcs.stop_on_motorway(new_pt,
-                other_route_geom, mways_buffer_geom,
+        if mways_isect_geom_other_route and motorway_calcs.stop_on_motorway(
+                new_pt, other_route_geom, mways_isect_geom_other_route,
                 route_geom_transform):
             #print "...but skipping since isect loc is a motorway "\
             #    "on other route."
             new_pt.Destroy()
             return 0
-        src_srs = route_geom.GetSpatialReference()
+        routes_srs = route_geom.GetSpatialReference()
         stop_id = tp_model.add_stop(stops_lyr, stops_multipoint,
-            TRANSFER_SELF_NAME, new_pt, src_srs)
+            tp_model.STOP_TYPE_SELF_TFER, new_pt, routes_srs)
+        stops_multipoint_route_subset.AddGeometry(new_pt)    
         stops_added_cnt = 1
         new_pt.Destroy()
         #print "...and adding a stop here: B%d." % stop_id
@@ -206,19 +204,21 @@ def add_valid_intersection_stops(pt_coords, stops_lyr,
         new_pt_other = route_geom_ops.get_nearest_point_on_route_within_buf(
             new_pt, other_route_geom, other_route_in_range)
         assert new_pt_other is not None
-        if mways_buffer_geom and motorway_calcs.stop_on_motorway(new_pt_other,
-                other_route_geom, mways_buffer_geom,
+        if mways_isect_geom_other_route and motorway_calcs.stop_on_motorway(
+                new_pt_other,
+                other_route_geom, mways_isect_geom_other_route,
                 route_geom_transform):
             #print "...but skipping since isect loc is a motorway "\
             #    "on other route."
             new_pt.Destroy()
             new_pt_other.Destroy()
             return 0
-        src_srs = route_geom.GetSpatialReference()
+        routes_srs = route_geom.GetSpatialReference()
         stop_id_1 = tp_model.add_stop(stops_lyr, stops_multipoint,
-            TRANSFER_SELF_NAME, new_pt, src_srs)
+            tp_model.STOP_TYPE_SELF_TFER, new_pt, routes_srs)
         stop_id_2 = tp_model.add_stop(stops_lyr, stops_multipoint,
-            TRANSFER_SELF_NAME, new_pt_other, src_srs)
+            tp_model.STOP_TYPE_SELF_TFER, new_pt_other, routes_srs)
+        stops_multipoint_route_subset.AddGeometry(new_pt)    
         stops_added_cnt = 2
         new_pt.Destroy()
         new_pt_other.Destroy()
@@ -231,8 +231,10 @@ def add_valid_intersection_stops(pt_coords, stops_lyr,
     return stops_added_cnt
 
 def add_key_intersection_points_as_stops(isect_line, stops_lyr,
-        stops_multipoint, mways_buffer_geom, route_geom_transform,
-        route_geom, other_route_geom):
+        stops_multipoint, mways_isect_geom_route,
+        mways_isect_geom_other_route, route_geom_transform,
+        route_geom, other_route_geom,
+        stops_multipoint_route_subset):
     stops_added_cnt = 0
     isect_point_cnt = isect_line.GetPointCount()
     if isect_point_cnt > 0:
@@ -241,21 +243,42 @@ def add_key_intersection_points_as_stops(isect_line, stops_lyr,
         for pt_coords in isect_pts_interest:
             stops_added_cnt += add_valid_intersection_stops(pt_coords,
                 stops_lyr, stops_multipoint,
-                mways_buffer_geom, route_geom_transform,
-                route_geom, other_route_geom)
+                mways_isect_geom_route, mways_isect_geom_other_route,
+                route_geom_transform,
+                route_geom, other_route_geom,
+                stops_multipoint_route_subset)
     return stops_added_cnt
 
 def add_self_transfer_stops(stops_lyr, input_routes_lyr,
-        mways_buffer_geom, route_geom_transform, stops_multipoint):
+        mways_route_isects, route_geom_transform, stops_multipoint):
     print "Adding 'self-transfer' stops at intersections between routes...."
     self_transfer_stops_total = 0
-    for ii, route in enumerate(input_routes_lyr):
+
+    mways_this_route_isect = None
+    mways_other_route_isect = None
+
+    routes_srs = input_routes_lyr.GetSpatialRef()
+    # pre-build an array of route extents to speed up.
+    route_envelopes = []
+    for ri, route in enumerate(input_routes_lyr):
+        route_geom = route.GetGeometryRef()
+        route_envelopes.append(route_geom.GetEnvelope())
+        route.Destroy()
+    input_routes_lyr.ResetReading()
+
+    for ri, route in enumerate(input_routes_lyr):
         rname = route.GetField(0)
         print "...adding self-transfer stops from route %s...." % rname
         route_geom = route.GetGeometryRef()
+        # We only care about a subset of all points.
+        route_buffer = route_geom.Buffer(
+            route_geom_ops.STOP_ON_ROUTE_CHECK_DIST)
+        stops_multipoint_route_subset = stops_multipoint.Intersection(
+            route_buffer)
+        route_buffer.Destroy()
         route_isect_stops_total = 0
-        for jj in range(ii+1, input_routes_lyr.GetFeatureCount()):
-            other_route = input_routes_lyr.GetFeature(jj)
+        for rj in range(ri+1, input_routes_lyr.GetFeatureCount()):
+            other_route = input_routes_lyr.GetFeature(rj)
             #print "Testing for intersection pts on routes '%s' and '%s' "\
             #    % (route.GetField(0), other_route.GetField(0))
             # Put a buffer around 2nd route before we do the intersect
@@ -263,29 +286,56 @@ def add_self_transfer_stops(stops_lyr, input_routes_lyr,
             # may not actually be co-incident even though nominally 
             # running parallel on the same route for a section)
             other_route_geom = other_route.GetGeometryRef() 
+
+            # Various quick comparisons to skip ahead if we can.
+            # Envelope order is (minX, maxX, minY, maxY)
+            route_env_i = route_envelopes[ri]
+            route_env_j = route_envelopes[rj]
+            tdist = BUFFER_DIST_SELF_ROUTE_TRANSFER
+            if      route_env_i[0] + tdist > route_env_j[1] or \
+                    route_env_i[1] < route_env_j[0] - tdist \
+                    or route_env_i[2] + tdist > route_env_j[3] \
+                    or route_env_i[3] < route_env_j[2] - tdist: 
+            #        or route_geom.Distance(other_route_geom) > \
+            #            BUFFER_DIST_SELF_ROUTE_TRANSFER:
+                other_route.Destroy()
+                continue
+
             other_route_buffer_geom = other_route_geom.Buffer(
                 BUFFER_DIST_SELF_ROUTE_TRANSFER)
             # calculate intersects between route and buffered
             route_isect = route_geom.Intersection(other_route_buffer_geom)
+            other_route_buffer_geom.Destroy()
             isect_type = route_isect.GetGeometryName()
+            if mways_route_isects:
+                mways_this_route_isect = mways_route_isects[ri]
+                mways_other_route_isect = mways_route_isects[rj]
             if route_isect.GetGeometryCount() == 0:
                 if route_isect.GetPointCount() > 0:
                     added_cnt = add_key_intersection_points_as_stops(
                         route_isect,
                         stops_lyr, stops_multipoint,
-                        mways_buffer_geom, route_geom_transform,
-                        route_geom, other_route_geom)
+                        mways_this_route_isect, mways_other_route_isect,
+                        route_geom_transform,
+                        route_geom, other_route_geom,
+                        stops_multipoint_route_subset)
                     route_isect_stops_total += added_cnt
             else:
                 for line in route_isect:
                     added_cnt = add_key_intersection_points_as_stops(line,
                         stops_lyr, stops_multipoint,
-                        mways_buffer_geom, route_geom_transform,
-                        route_geom, other_route_geom)
+                        mways_this_route_isect, mways_other_route_isect,
+                        route_geom_transform,
+                        route_geom, other_route_geom,
+                        stops_multipoint_route_subset)
                     route_isect_stops_total += added_cnt
+            route_isect.Destroy()
+            other_route.Destroy()
         print "...added %d self-transfer stops for route %s." % \
             (route_isect_stops_total, rname)
         self_transfer_stops_total += route_isect_stops_total
+        stops_multipoint_route_subset.Destroy()
+        route.Destroy()
     input_routes_lyr.ResetReading()
     print "...done adding self-transfer stops (a total of %d).\n" % \
         self_transfer_stops_total
@@ -293,9 +343,11 @@ def add_self_transfer_stops(stops_lyr, input_routes_lyr,
  
 def add_nearest_point_on_route_as_stop(route_sec_within_range,
         stops_lyr, stops_multipoint, 
-        mways_buffer_geom, route_geom_transform,
+        mways_this_route_isect, route_geom_transform,
         route_geom, other_s_geom, other_s_buf,
-        stop_typ_name, stop_min_dist):
+        stop_typ_name, stop_min_dist,
+        stops_multipoint_route_subset):
+    added_cnt = 0
     route_geom_srs = route_geom.GetSpatialReference()
     closest_pt_g = route_geom_ops.get_nearest_point_on_route_within_buf(
         other_s_geom, route_geom, route_sec_within_range)
@@ -308,7 +360,7 @@ def add_nearest_point_on_route_as_stop(route_sec_within_range,
     # Now, need to check if there are other stops already added on this
     # line, within min dist to place stops.
     min_dist_on_route = route_geom_ops.get_stops_already_on_route_within_dist(
-        closest_pt_g, route_geom, stops_multipoint, 
+        closest_pt_g, route_geom, stops_multipoint_route_subset, 
         stop_min_dist)
     if min_dist_on_route == []:
         min_dist_on_line = sys.maxint
@@ -317,10 +369,9 @@ def add_nearest_point_on_route_as_stop(route_sec_within_range,
         min_dist_on_line = min_dist_on_route[0][1]
         #print "...(calculated min dist to other stop on route as %.2f)" % \
         #    min_dist_on_line    
-
     if min_dist_on_line >= stop_min_dist:
-        if mways_buffer_geom and motorway_calcs.stop_on_motorway(
-                closest_pt_g, route_geom, mways_buffer_geom,
+        if mways_this_route_isect and motorway_calcs.stop_on_motorway(
+                closest_pt_g, route_geom, mways_this_route_isect,
                 route_geom_transform):
             #print "...but skipping since closest point is on a motorway "\
             #    "on nearby route."
@@ -328,12 +379,14 @@ def add_nearest_point_on_route_as_stop(route_sec_within_range,
         else:
             stop_id = tp_model.add_stop(stops_lyr, stops_multipoint,
                 stop_typ_name, closest_pt_g, route_geom_srs)
+            added_cnt += 1
+            stops_multipoint_route_subset.AddGeometry(closest_pt_g)
             #print "...added stop B%d." % stop_id
     else:
         #print "...not adding stop, since is < %.1fm (min dist this mode) "\
         #    "to existing stop on this line." % stop_min_dist
         pass
-    return
+    return added_cnt
 
 def save_tfer_info(shp_file_name, route, route_sec_within_range, other_stop):
     """A helper func. to save debugging info to disk."""                
@@ -360,97 +413,156 @@ def save_tfer_info(shp_file_name, route, route_sec_within_range, other_stop):
     segs_shp_file.Destroy()
 
 def add_other_network_transfer_stops(stops_lyr, input_routes_lyr,
-        mways_buffer_geom, route_geom_transform,
+        mways_route_isects, route_geom_transform,
         transfer_network_defs, stops_multipoint):
+
     print "Checking for need to add transfer stops near other networks"
+    routes_srs = input_routes_lyr.GetSpatialRef()
+    # pre-build an array of route extents to speed up.
+    route_envelopes = []
+    for ri, route in enumerate(input_routes_lyr):
+        route_geom = route.GetGeometryRef()
+        route_envelopes.append(route_geom.GetEnvelope())
+        route.Destroy()
+    input_routes_lyr.ResetReading()
+
+    one_tenth_routes = max(input_routes_lyr.GetFeatureCount() / 10.0, 1)
     for isect_nw_def in transfer_network_defs:
-        print "Checking in network defined in shpfile %s" % \
-            isect_nw_def.shp_fname
+        total_nw_tfer_stops_mode = 0
         tfer_nw_stop_shp = osgeo.ogr.Open(isect_nw_def.shp_fname, 0)
+        tfer_nw_stop_lyr = tfer_nw_stop_shp.GetLayer(0)    
+        total_stops_tfer_nw = tfer_nw_stop_lyr.GetFeatureCount()
+        print "Checking near the %d stops network defined in shpfile %s" % \
+            (total_stops_tfer_nw, isect_nw_def.shp_fname)
         if tfer_nw_stop_shp is None:
             print "Error, input transfer network stop shape file given, "\
                 "%s , failed to open." \
                 % (isect_nw_def.shp_fname)
             sys.exit(1)
-        tfer_nw_stop_lyr = tfer_nw_stop_shp.GetLayer(0)    
         stop_typ_name = isect_nw_def.stop_typ_name
 
-        src_srs = tfer_nw_stop_lyr.GetSpatialRef()
-        target_srs = input_routes_lyr.GetSpatialRef()
+        other_nw_srs = tfer_nw_stop_lyr.GetSpatialRef()
+        transform = osr.CoordinateTransformation(other_nw_srs, routes_srs)
 
         if isect_nw_def.skip_on_mway == True:
             print "(Disabling adding stops onto motorway sections for "\
                 "this mode.)"
-            mways_buffer_geom_this_mode = mways_buffer_geom
-            route_geom_transform_this_mode = route_geom_transform
+            mways_route_isects_this_mode = mways_route_isects
         else:
             print "(Enabling adding stops onto motorway sections for "\
                 "this mode.)"
             # Override these motorway overrides in this function.
-            mways_buffer_geom_this_mode = None
-            route_geom_transform_this_mode = None
+            mways_route_isects_this_mode = None
 
-        total_stops_tfer_nw = tfer_nw_stop_lyr.GetFeatureCount()
-        for ii, other_stop in enumerate(tfer_nw_stop_lyr):
-            #print "Checking for routes within %.1fm of stop %d(%s)" % \
-            #    (isect_nw_def.tfer_range, ii, other_stop.GetField("Name"))
-            other_s_geom = other_stop.GetGeometryRef()
-            # Now need to transform into this coord system.
-            transform = osr.CoordinateTransformation(src_srs, target_srs)
-            other_s_geom.Transform(transform)
-            other_s_buf = other_s_geom.Buffer(isect_nw_def.tfer_range)
-            for route in input_routes_lyr:
-                route_geom = route.GetGeometryRef()
-                route_sec_within_range = route_geom.Intersection(
-                    other_s_buf)
+        mways_this_route_isect = None
+        routes_since_print = 0
+        for ri, route in enumerate(input_routes_lyr):
+            rname = route.GetField(0)
+            route_geom = route.GetGeometryRef()
+            if routes_since_print / one_tenth_routes >= 1:
+                print "...Processed %d of the routes looking for tfers" % (ri)
+                routes_since_print = 0
+            else:
+                routes_since_print += 1
+            #if rname not in ["R1", "R5"]: continue
+            #print "..Checking for route %s against all tfer stops" % rname
+            if mways_route_isects_this_mode:
+                mways_this_route_isect = mways_route_isects_this_mode[ri]
+            # We only care about a subset of all stops.
+            route_buffer = route_geom.Buffer(
+                route_geom_ops.STOP_ON_ROUTE_CHECK_DIST)
+            stops_multipoint_route_subset = stops_multipoint.Intersection(
+                route_buffer)
+            route_buffer.Destroy()
+
+            route_env = route_envelopes[ri]
+
+            for osi, other_stop in enumerate(tfer_nw_stop_lyr):
+                #print "Checking for routes within %.1fm of stop %d(%s)" % \
+                #    (isect_nw_def.tfer_range, osi, other_stop.GetField("Name"))
+                other_s_geom = other_stop.GetGeometryRef()
+                # Now need to transform into this coord system.
+                other_s_geom.Transform(transform)
+                other_s_buf = other_s_geom.Buffer(isect_nw_def.tfer_range)
+
+                stop_tfer_env = other_s_buf.GetEnvelope()
+                # Various quick comparisons to skip ahead if we can.
+                # Envelope order is (minX, maxX, minY, maxY)
+                if      stop_tfer_env[0] > route_env[1] or \
+                        stop_tfer_env[1] < route_env[0] \
+                        or stop_tfer_env[2] > route_env[3] \
+                        or stop_tfer_env[3] < route_env[2] \
+                        or route_geom.Distance(other_s_geom) > \
+                            isect_nw_def.tfer_range:
+                    other_s_buf.Destroy()
+                    other_stop.Destroy()
+                    continue
+
+                route_sec_within_range = route_geom.Intersection(other_s_buf)
+
                 #if other_stop.GetField("Name") == "Name_of_interest"\
                 #        and route.GetField(0) == "R1":
                     #save_tfer_info("tfers.shp", route,
                     #    route_sec_within_range, other_stop)
 
+                added = 0
                 if route_sec_within_range.GetGeometryCount() == 0 \
                         and route_sec_within_range.GetPointCount() > 0:
                     #print "...sections of route %s within range..." %\
                     #    route.GetField(0)    
-                    add_nearest_point_on_route_as_stop(
+                    added += add_nearest_point_on_route_as_stop(
                         route_sec_within_range,
                         stops_lyr, stops_multipoint,
-                        mways_buffer_geom_this_mode, 
-                        route_geom_transform_this_mode,
+                        mways_this_route_isect, 
+                        route_geom_transform,
                         route_geom, other_s_geom, other_s_buf, 
                         stop_typ_name,
-                        isect_nw_def.stop_min_dist)
+                        isect_nw_def.stop_min_dist,
+                        stops_multipoint_route_subset)
                 elif route_sec_within_range.GetGeometryCount() > 0:
                     # multiple polylines. Operate on each.
                     #print "...sections of route %s within range..." %\
                     #    route.GetField(0)    
                     for line in route_sec_within_range:
-                        add_nearest_point_on_route_as_stop(line,
+                        added += add_nearest_point_on_route_as_stop(line,
                             stops_lyr, stops_multipoint,
-                            mways_buffer_geom_this_mode, 
-                            route_geom_transform_this_mode,
+                            mways_this_route_isect, 
+                            route_geom_transform,
                             route_geom, other_s_geom, other_s_buf,
                             stop_typ_name,
-                            isect_nw_def.stop_min_dist)
-            input_routes_lyr.ResetReading()
+                            isect_nw_def.stop_min_dist,
+                            stops_multipoint_route_subset)
+                total_nw_tfer_stops_mode += added
+                other_stop.Destroy()
+                other_s_buf.Destroy()
+            route.Destroy()
+            if stops_multipoint_route_subset:
+                stops_multipoint_route_subset.Destroy()
+            tfer_nw_stop_lyr.ResetReading()
+        input_routes_lyr.ResetReading()
         tfer_nw_stop_shp.Destroy()
-        print "...finished adding tfer stops for this shapefile "\
-            "(with type %s)" % (stop_typ_name)
+        print "..finished adding tfer stops for this shapefile "\
+            "(with type %s) - %d total" % \
+                (stop_typ_name, total_nw_tfer_stops_mode)
     return
 
-def add_filler_stops(stops_lyr, input_routes_lyr, mways_buffer_geom,
+def add_filler_stops(stops_lyr, input_routes_lyr, mways_route_isects,
         route_geom_transform, filler_dist, filler_stop_type, stops_multipoint):
     """Note: if motorways_lyr is None, it will be ignored. Otherwise it will
     be used to check and ignore adding filler stops on motorways."""    
     print "\nAdding Filler stops at max dist %.1fm:" % filler_dist
-    src_srs = input_routes_lyr.GetSpatialRef()
+    routes_srs = input_routes_lyr.GetSpatialRef()
     
+    mways_this_route_isect = None
     for ii, route in enumerate(input_routes_lyr):
         rname = route.GetField(0)
+        #if rname != "R2": continue
         route_geom = route.GetGeometryRef()
         route_length_total = route_geom.Length()
         print "Adding Filler stops for route %s (%.1fm length)" % \
             (rname, route_length_total)
+        if mways_route_isects:
+            mways_this_route_isect = mways_route_isects[ii]
         # First, get the stops of interest along route, we need to 'walk'
         route_buffer = route_geom.Buffer(
             route_geom_ops.STOP_ON_ROUTE_CHECK_DIST)
@@ -471,6 +583,7 @@ def add_filler_stops(stops_lyr, input_routes_lyr, mways_buffer_geom,
         end_vertex = ogr.Geometry(ogr.wkbPoint)
         end_vertex.AddPoint(*end_coord)
 
+        route_remaining = route_length_total
         route_length_processed = 0
         line_remains = True
         stops_found = 0
@@ -478,10 +591,11 @@ def add_filler_stops(stops_lyr, input_routes_lyr, mways_buffer_geom,
         filler_stops_skipped_on_motorways = 0
         last_stop_i_along_route = None
         next_stop_i_along_route = None
+        last_vertex_i = 0
         while line_remains is True:
-            next_stop_on_route_isect, stop_ii, dist_to_next = \
+            next_stop_on_route_isect, stop_ii, dist_to_next, n_last_vertex_i =\
                 route_geom_ops.get_next_stop_and_dist(route_geom, current_loc,
-                    stops_near_route, rem_stop_is)
+                    stops_near_route, rem_stop_is, last_vertex_i)
             if next_stop_on_route_isect is not None:
                 rem_stop_is.remove(stop_ii)
                 stops_found += 1
@@ -494,15 +608,17 @@ def add_filler_stops(stops_lyr, input_routes_lyr, mways_buffer_geom,
                 #    (filler_incs, last_stop_i_along_route, \
                 #     next_stop_i_along_route, dist_to_next, \
                 #     walk_dist_to_filler)
+                filler_l_v_i = last_vertex_i
                 for ii in range(1, filler_incs+1):
-                    current_loc = route_geom_ops.move_dist_along_route(
-                        route_geom, current_loc, walk_dist_to_filler)
+                    current_loc, filler_l_v_i = \
+                        route_geom_ops.move_dist_along_route(route_geom,
+                            current_loc, walk_dist_to_filler, filler_l_v_i)
                     filler_geom = ogr.Geometry(ogr.wkbPoint)
                     filler_geom.AddPoint(*current_loc)
-                    if mways_buffer_geom:
+                    if mways_route_isects:
                         if motorway_calcs.stop_on_motorway(filler_geom,
-                                route_geom, mways_buffer_geom,
-                                route_geom_transform):
+                                route_geom, mways_this_route_isect,
+                                route_geom_transform, filler_l_v_i):
                             filler_stops_skipped_on_motorways += 1
                             #print "..mway skip filler stop at %.1f, %.1f" %\
                             #    (current_loc[0], current_loc[1])
@@ -510,10 +626,11 @@ def add_filler_stops(stops_lyr, input_routes_lyr, mways_buffer_geom,
                     #print "..adding filler stop at %.1f, %.1f" %\
                     #    (current_loc[0], current_loc[1])
                     stop_id = tp_model.add_stop(stops_lyr, stops_multipoint,
-                        filler_stop_type, filler_geom, src_srs)
+                        filler_stop_type, filler_geom, routes_srs)
                     filler_stops_added += 1    
             # Walk ahead.
             current_loc = next_stop_on_route_isect
+            last_vertex_i = n_last_vertex_i
             last_stop_i_along_route = next_stop_i_along_route
             route_length_processed += dist_to_next
             route_remaining = route_length_total - route_length_processed
@@ -533,7 +650,7 @@ def add_filler_stops(stops_lyr, input_routes_lyr, mways_buffer_geom,
         end_vertex.Destroy()
         print "..added %d filler stops between the %d existing stops "\
             "detected for this route." % (filler_stops_added, stops_found)
-        if mways_buffer_geom:
+        if mways_route_isects:
             print "..(%d potential filler stops skipped due to detected as "\
                 "being on motorways.)" % (filler_stops_skipped_on_motorways)
     input_routes_lyr.ResetReading()
@@ -578,23 +695,46 @@ def create_stops(input_routes_lyr, motorways_lyr, stops_shp_file_name,
     stops_multipoint = ogr.Geometry(ogr.wkbMultiPoint)
 
     mways_buffer_geom = None
+    mways_route_isects = None
     route_geom_transform = None
     if motorways_lyr:
-        src_srs = input_routes_lyr.GetSpatialRef()
+        routes_srs = input_routes_lyr.GetSpatialRef()
         target_srs = osr.SpatialReference()
         target_srs.ImportFromEPSG(route_geom_ops.COMPARISON_EPSG)
-        route_geom_transform = osr.CoordinateTransformation(src_srs, target_srs)
+        route_geom_transform = osr.CoordinateTransformation(routes_srs, target_srs)
         mways_buffer_geom = motorway_calcs.create_motorways_buffer(
             motorways_lyr, target_srs)
+        print "Creating mway buffer isects for routes ...."
+        mways_route_isects = []
+        for ii, route in enumerate(input_routes_lyr):
+            route_geom = route.GetGeometryRef()
+            # Sub-select the mways_buffer_geom first.
+            # As filler stops are going to only be on the route, don't 
+            #  need to buffer around route first.
+            route_geom_clone = route_geom.Clone()
+            route_geom_clone.Transform(route_geom_transform)
+            route_buffer = route_geom_clone.Buffer(
+                route_geom_ops.VERY_NEAR_ROUTE)
+            mways_route_isects.append(route_buffer.Intersection(
+                mways_buffer_geom))
+            route_geom_clone.Destroy()
+            route_buffer.Destroy()
+        input_routes_lyr.ResetReading()
+        print ".... done."
+
     add_route_start_end_stops(stops_lyr, input_routes_lyr, stops_multipoint)
     add_self_transfer_stops(stops_lyr, input_routes_lyr,
-        mways_buffer_geom, route_geom_transform, stops_multipoint)
+        mways_route_isects, route_geom_transform, stops_multipoint)
     add_other_network_transfer_stops(stops_lyr, input_routes_lyr,
-        mways_buffer_geom, route_geom_transform,
+        mways_route_isects, route_geom_transform,
         transfer_networks_def, stops_multipoint)
-    add_filler_stops(stops_lyr, input_routes_lyr, mways_buffer_geom,
-        route_geom_transform, filler_dist, FILLER_NAME, stops_multipoint)
+    add_filler_stops(stops_lyr, input_routes_lyr, mways_route_isects,
+        route_geom_transform, filler_dist, tp_model.STOP_TYPE_FILLERS, stops_multipoint)
     stops_shp_file.Destroy()
+    if motorways_lyr:
+        mways_buffer_geom.Destroy()
+        for mways_route_isect in mways_route_isects:
+            mways_route_isect.Destroy()
     return
 
 def main():

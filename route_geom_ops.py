@@ -57,7 +57,8 @@ def get_min_dist_other_stop_also_on_route(search_point_geom,
         pass
     return min_dist_also_on_line
 
-def get_stops_already_on_route_within_dist(new_pt, route_geom, stops_multipoint, test_dist):
+def get_stops_already_on_route_within_dist(new_pt, route_geom,
+        stops_multipoint, test_dist):
     buf_near_pt = new_pt.Buffer(test_dist * 1.05)
     route_geom_in_buf = route_geom.Intersection(buf_near_pt)
     stops_on_route_within_dist = []
@@ -122,6 +123,7 @@ def advance_along_route_to_loc(segs_iterator, loc):
     # outside the for statement to use in 2nd loop.
     start_stop_proj_onto_route = None
     min_dist_to_route = sys.maxint
+    vertexes_passed = 0
     for seg_start, seg_end in segs_iterator:
         isect_pt, within_seg, uval = lineargeom.intersect_point_to_line(loc,
             seg_start, seg_end)
@@ -136,6 +138,7 @@ def advance_along_route_to_loc(segs_iterator, loc):
             # a segment'
             start_stop_proj_onto_route = isect_pt
             break
+        vertexes_passed += 1    
     if start_stop_proj_onto_route == None:
         func_name = inspect.stack()[0][3]
         print "Error: %s() called with a location not within "\
@@ -144,16 +147,27 @@ def advance_along_route_to_loc(segs_iterator, loc):
             (func_name, STOP_ON_ROUTE_CHECK_DIST, loc[0], \
              loc[1], min_dist_to_route)
         sys.exit(1)
-    return start_stop_proj_onto_route, seg_start, seg_end
+    return start_stop_proj_onto_route, seg_start, seg_end, vertexes_passed
 
 def get_next_stop_and_dist(route_geom, current_loc_on_route,
-        stops_multipoint_near_route, rem_stop_is):
+        stops_multipoint_near_route, rem_stop_is, last_vertex_i=None):
     start_pt = current_loc_on_route
     linear_dist_to_next_stop = 0
 
     segs_iterator = lineargeom.pairs(route_geom.GetPoints())
-    start_stop_proj_onto_route, seg_start, seg_end = advance_along_route_to_loc(
-        segs_iterator, start_pt)
+    if last_vertex_i is None:
+        # Initialise.
+        last_vertex_i = 0
+    else:
+        assert last_vertex_i < route_geom.GetPointCount()
+        # "Fast-forward" segs iterator to last known vertex
+        vertex_i = 0
+        while vertex_i < last_vertex_i:
+            segs_iterator.next()
+            vertex_i += 1
+    start_stop_proj_onto_route, seg_start, seg_end, vertexes_passed = \
+        advance_along_route_to_loc(segs_iterator, start_pt)
+    last_vertex_i += vertexes_passed
     # Now we are going to walk thru remaining segments, and keep testing
     # remaining stops till we find one on the current segment.
     linear_dist_from_start_stop = 0
@@ -194,27 +208,54 @@ def get_next_stop_and_dist(route_geom, current_loc_on_route,
                 linear_dist_from_start_stop += min_stop_isect_from_seg_start
                 break
             else:
-                linear_dist_from_start_stop += lineargeom.magnitude(seg_start, seg_end)
+                linear_dist_from_start_stop += lineargeom.magnitude(seg_start,
+                    seg_end)
             seg_start, seg_end = segs_iterator.next()
+            last_vertex_i += 1
     except StopIteration:
         pass
-    return next_stop_on_route_isect, next_stop_on_route_ii, linear_dist_from_start_stop
+    return next_stop_on_route_isect, next_stop_on_route_ii, \
+        linear_dist_from_start_stop, last_vertex_i
 
-def move_dist_along_route(route_geom, current_loc, dist_along_route):
+def move_dist_along_route(route_geom, current_loc, dist_along_route,
+        last_vertex_i=None):
     segs_iterator = None
     rem_dist = 0
-    if dist_along_route == 0:
-        return current_loc
-    elif dist_along_route > 0:
+    if dist_along_route == 0 and last_vertex_i is not None:
+        # The 2nd clause needed since we may need to work out last
+        #  vertex i, even if not moving.
+        return current_loc, last_vertex_i
+    elif dist_along_route >= 0:
         rem_dist = dist_along_route
         segs_iterator = lineargeom.pairs(route_geom.GetPoints())
     else:
         # Flip directions.
         rem_dist = -dist_along_route
         segs_iterator = lineargeom.reverse_pairs(route_geom.GetPoints())
-    # Get to current location
-    start_loc_proj_onto_route, seg_start, seg_end = advance_along_route_to_loc(
-        segs_iterator, current_loc)
+
+    # Setup last_vertex_i and fast-fwd to there
+    if last_vertex_i is None:
+        # Initialise
+        if dist_along_route >= 0:
+            last_vertex_i = 0
+        else:
+            total_vertexes = route_geom.GetPointCount()
+            last_vertex_i = (total_vertexes - 1) - 1
+    else:
+        total_vertexes = route_geom.GetPointCount()
+        assert last_vertex_i < total_vertexes
+        # "Fast-forward" segs iterator to last known vertex
+        vertex_i = 0
+        vertex_skip_total = last_vertex_i
+        if dist_along_route < 0:
+            # we're going backwards in this case.
+            vertex_skip_total = (total_vertexes-1) - last_vertex_i - 1
+        while vertex_i < vertex_skip_total:
+            segs_iterator.next()
+            vertex_i += 1
+
+    start_loc_proj_onto_route, seg_start, seg_end, vertexes_passed = \
+        advance_along_route_to_loc(segs_iterator, current_loc)
     # Keep walking remaining segs until req. distance travelled.    
     # Special case for start of below loop :- consider "seg_start" as our
     # starting location.
@@ -228,8 +269,13 @@ def move_dist_along_route(route_geom, current_loc, dist_along_route):
                 new_loc = lineargeom.point_dist_along_line(seg_start, seg_end, rem_dist)
                 break
             seg_start, seg_end = segs_iterator.next()
+            vertexes_passed += 1
     except StopIteration:
         # Means we've walked the whole route, so just move to the end of final
         # segment.
         new_loc = seg_end
-    return new_loc
+    if dist_along_route >= 0:
+        last_vertex_i += vertexes_passed
+    else:
+        last_vertex_i -= vertexes_passed
+    return new_loc, last_vertex_i

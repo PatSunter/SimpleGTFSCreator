@@ -16,6 +16,10 @@ import route_segs
 import mode_timetable_info as m_t_info
 
 DELETE_EXISTING = True
+# This skips building very short segments.
+#MIN_SEGMENT_LENGTH = 50.0
+MIN_SEGMENT_LENGTH = 50.0
+
 
 def build_multipoint_from_lyr(stops_lyr):
     stops_multipoint = ogr.Geometry(ogr.wkbMultiPoint)
@@ -71,14 +75,18 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
     print "Building route segment ref. infos:"
     for ii, route in enumerate(input_routes_lyr):
         rname = route.GetField(0)
+        #if rname != "R71": continue
         start_cnt = len(all_seg_refs)
         new_segs_cnt = 0
         seg_refs_this_route = []
-        print "Creating route segments infos for route %s" % rname
         # Get the stops of interest along route, we need to 'walk'
-        route_geom = route.GetGeometryRef()
         # Do a transform now for comparison purposes - before creating buffer
+        route_geom = route.GetGeometryRef()
         route_geom.Transform(route_transform)
+        route_length_total = route_geom.Length()
+        print "Creating route segments infos for route %s (%.1fm length)" \
+            % (rname, route_length_total)
+
         route_buffer = route_geom.Buffer(
             route_geom_ops.STOP_ON_ROUTE_CHECK_DIST)
         stops_near_route, isect_map = get_multipoint_within_with_map(
@@ -87,70 +95,151 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
             print "Error, no stops detected near route %s while creating "\
                 "segments." % rname
             sys.exit()    
-        rem_stop_is = range(stops_near_route.GetGeometryCount())
+        all_stop_is = range(stops_near_route.GetGeometryCount())
+        unvisited_stop_is = all_stop_is[:]
         start_coord = route_geom.GetPoint(0)
         current_loc = start_coord
         end_coord = route_geom.GetPoint(route_geom.GetPointCount()-1)
         end_vertex = ogr.Geometry(ogr.wkbPoint)
         end_vertex.AddPoint(*end_coord)
+
+        route_length_processed = 0
+        route_remaining = route_length_total
         line_remains = True
         stops_found = 0
         last_stop_i_along_route = None
         last_stop_i_in_route_set = None
         next_stop_i_along_route = None
         next_stop_i_in_route_set = None
+        stop_is_to_remove_from_search = []
+        last_vertex_i = 0
+        skipped_dist = 0
+        last_stop_id_before_skipping = None
         while line_remains is True:
-            next_stop_on_route_isect, stop_ii, dist_to_next = \
+            # Pass in all_stop_is here, except the stop we just visited:
+            # to allow for possibility of a route that visits the same stop more than once.
+            allowed_stop_is = all_stop_is[:]
+            if last_stop_i_along_route is not None:
+                for si in stop_is_to_remove_from_search:
+                    allowed_stop_is.remove(si)
+
+            next_stop_on_route_isect, stop_ii, dist_to_next, last_vertex_i = \
                 route_geom_ops.get_next_stop_and_dist(route_geom, current_loc,
-                    stops_near_route, rem_stop_is)
+                    stops_near_route, allowed_stop_is, last_vertex_i)
+            
             if next_stop_on_route_isect is None:
                 # No more stops detected - Finish.
+                assert len(unvisited_stop_is) == 0
+                line_remains = False
+                if route_remaining > route_geom_ops.STOP_ON_ROUTE_CHECK_DIST:
+                    print "WARNING: for route %s, last stop is %.1fm from "\
+                        "end of route (>%.1fm)." % \
+                        (rname, route_remaining, \
+                        route_geom_ops.STOP_ON_ROUTE_CHECK_DIST)
+                if last_stop_i_in_route_set is not None:
+                    last_stop_i = isect_map[last_stop_i_in_route_set]
+                    last_stop = input_stops_lyr.GetFeature(last_stop_i)
+                    try:
+                        if last_stop.GetField(tp_model.STOP_TYPE_FIELD) != \
+                                tp_model.STOP_TYPE_ROUTE_START_END:
+                            print "WARNING: for route %s, last stop found wasn't "\
+                                "of type %s." % tp_model.STOP_TYPE_ROUTE_START_END
+                    except ValueError:
+                        # Legacy stop sets like motorways don't always have
+                        # these fields.
+                        pass
                 break
 
-            rem_stop_is.remove(stop_ii)
-            stops_found += 1
-            next_stop_i_along_route = stops_found-1
             next_stop_i_in_route_set = stop_ii
+            assert next_stop_i_in_route_set in all_stop_is
+            try:
+                unvisited_stop_is.remove(stop_ii)
+            except ValueError:
+                # We have visited a stop for second time. This is ok.
+                pass
 
-            if last_stop_i_along_route is not None:
-                last_stop_i = isect_map[last_stop_i_in_route_set]
-                last_stop = input_stops_lyr.GetFeature(last_stop_i)
-                last_stop_id = last_stop.GetField(tp_model.STOP_ID_FIELD)
-                next_stop_i = isect_map[next_stop_i_in_route_set]
-                next_stop = input_stops_lyr.GetFeature(next_stop_i)
-                next_stop_id = next_stop.GetField(tp_model.STOP_ID_FIELD)
-                #print "..adding seg b/w stops %02s (id %d) and "\
-                #    "%02s (id %d) (linear length %.1fm)" %\
-                #        (last_stop_i_along_route, last_stop_id,\
-                #         next_stop_i_along_route, next_stop_id,\
-                #         dist_to_next)
-                # This function will also handle updating the seg_ref lists
-                seg_ref, new_status = route_segs.add_update_seg_ref(
-                    last_stop_id, next_stop_id, rname,
-                    dist_to_next, all_seg_refs, seg_refs_this_route)
-                if new_status:
-                    new_segs_cnt += 1
-                last_stop.Destroy()
-                next_stop.Destroy()
-            else:
+            if last_stop_i_along_route is None:
+                # At the very first stop. Add to stops found list, but
+                # can't build a segment yet.
+                stops_found += 1
+                next_stop_i_along_route = stops_found-1
+                last_stop_i_along_route = next_stop_i_along_route
+                last_stop_i_in_route_set = next_stop_i_in_route_set
+                stop_is_to_remove_from_search.append(next_stop_i_in_route_set)
                 if dist_to_next > route_geom_ops.STOP_ON_ROUTE_CHECK_DIST:
                     print "Warning: for route %s, first stop is %.1fm from "\
                         "start of route (>%.1fm)." % \
                         (rname, dist_to_next, \
                         route_geom_ops.STOP_ON_ROUTE_CHECK_DIST)
+            else:
+                last_stop_i = isect_map[last_stop_i_in_route_set]
+                next_stop_i = isect_map[next_stop_i_in_route_set]
+                last_stop = input_stops_lyr.GetFeature(last_stop_i)
+                next_stop = input_stops_lyr.GetFeature(next_stop_i)
+                last_stop_id = last_stop.GetField(tp_model.STOP_ID_FIELD)
+                next_stop_id = next_stop.GetField(tp_model.STOP_ID_FIELD)
+                if dist_to_next == 0.0:
+                    # Two stops on same position (bad). Skip one of them.
+                    if last_stop_id_before_skipping == None:
+                        last_stop_id_before_skipping = last_stop_id
+                    print "..Warning: two stops at same location: "\
+                        "stop ids %d and %d (loc on route is %s)- "\
+                        "Skipping creating a segment here." %\
+                        (last_stop_id, next_stop_id, \
+                         next_stop_on_route_isect)
+                    stop_is_to_remove_from_search.append(
+                        next_stop_i_in_route_set)
+                elif (skipped_dist + dist_to_next) < MIN_SEGMENT_LENGTH and \
+                        unvisited_stop_is:
+                    # Note the second clause above:- if we hit the very last
+                    #  stop, don't skip.
+                    if last_stop_id_before_skipping == None:
+                        last_stop_id_before_skipping = last_stop_id
+                    skipped_dist += dist_to_next
+                    print "..Note: skipping stop id %d because it is still "\
+                        "within min seg length, %.1fm, of last segment stop "\
+                        "%d. Dist to last = %.5fm. Dist skipped so far: %.5fm."\
+                        "(Loc on route is %s)." %\
+                        (next_stop_id, MIN_SEGMENT_LENGTH,
+                         last_stop_id_before_skipping, dist_to_next, \
+                         skipped_dist, next_stop_on_route_isect)
+                    stop_is_to_remove_from_search.append(
+                        next_stop_i_in_route_set)
+                else:
+                    stops_found += 1
+                    next_stop_i_along_route = stops_found-1
+                    #print "..adding seg b/w stops %02s (id %d) and "\
+                    #    "%02s (id %d) (linear length %.1fm)" %\
+                    #        (last_stop_i_along_route, last_stop_id,\
+                    #         next_stop_i_along_route, next_stop_id,\
+                    #         dist_to_next+skipped_dist)
+                    #This function will also handle updating the seg_ref lists
+                    seg_ref, new_status = route_segs.add_update_seg_ref(
+                        last_stop_id, next_stop_id, rname,
+                        dist_to_next+skipped_dist, all_seg_refs,
+                        seg_refs_this_route)
+                    if new_status:
+                        new_segs_cnt += 1
+                    last_stop_i_along_route = next_stop_i_along_route
+                    last_stop_i_in_route_set = next_stop_i_in_route_set
+                    # Set this list to just the stop we just added
+                    stop_is_to_remove_from_search = [next_stop_i_in_route_set] 
+                    # Reset these guys since we just added a segment.
+                    last_stop_id_before_skipping = None
+                    skipped_dist = 0
+                last_stop.Destroy()
+                next_stop.Destroy()
             # Walk ahead.
             current_loc = next_stop_on_route_isect
-            last_stop_i_along_route = next_stop_i_along_route
-            last_stop_i_in_route_set = next_stop_i_in_route_set
-            #curr_loc_pt = ogr.Geometry(ogr.wkbPoint)
-            #curr_loc_pt.AddPoint(*current_loc)
-            #dist_to_end = curr_loc_pt.Distance(end_vertex)
-            #curr_loc_pt.Destroy()
-            if next_stop_on_route_isect is None or len(rem_stop_is) == 0:
-            #        or dist_to_end < route_geom_ops.SAME_POINT:
-                assert len(rem_stop_is) == 0
-                line_remains = False
-                break
+            route_length_processed += dist_to_next
+            route_remaining = route_length_total - route_length_processed
+            if route_remaining < -route_geom_ops.STOP_ON_ROUTE_CHECK_DIST:
+                print "ERROR: somehow we've gone beyond end of total route"\
+                    " length in creating segments. Segs created so far = %d."\
+                    " Is there a loop in the route?"\
+                    " current loc (may not be source of problems) is %s." %\
+                    (len(seg_refs_this_route), current_loc)
+                sys.exit(1)
         route_seg_refs.append((rname,seg_refs_this_route))
         end_cnt = len(all_seg_refs)
         assert (end_cnt - start_cnt) == new_segs_cnt
