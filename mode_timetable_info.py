@@ -116,6 +116,10 @@ settings = {
         'id': 34,
         'index': 3400000,
         'stop_prefix': 'B',
+        # Dist used to decide if segments are considered 'on motorway'
+        # for speed purposes
+        'on_motorway_seg_check_dist': 100,
+        'min_seg_length_on_motorways': 650,
     },
     'bus-motorway': {
         'name': 'Melbourne Bus - Motorways',
@@ -128,7 +132,9 @@ settings = {
         'id': 36,
         'index': 3600000,
         'stop_prefix': 'N',
-    },    
+        'on_motorway_seg_check_dist': 80,
+        'min_seg_length_on_motorways': 300,
+    },
 }
 
 # These refs are necessary for setting appropriate speed for both bus and
