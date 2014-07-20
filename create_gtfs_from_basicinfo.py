@@ -13,6 +13,7 @@ from optparse import OptionParser
 import sys
 import os.path
 from operator import itemgetter
+import zipfile
 
 import osgeo.ogr
 from osgeo import ogr
@@ -29,7 +30,7 @@ VERBOSE = False
 # Calc this once to save a bit of time as its used a lot
 TODAY = date.today()
 
-ROUTE_WRITE_BATCH_SIZE = 20
+ROUTE_WRITE_BATCH_SIZE = 10
 
 class Seq_Stop_Info:
     """A small struct to store key info about a stop in the sequence of a
@@ -164,8 +165,12 @@ def build_stop_name_to_id_map(schedule):
         stop_name_to_id_map[stop.stop_name] = stop_id
     return stop_name_to_id_map
 
+def create_gtfs_service_periods(services_info, schedule):
+    for serv_period, period_info in services_info:
+        gtfs_period = add_service_period(serv_period, schedule)
+
 def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
-        mode_config, schedule, use_seg_speeds):
+        mode_config, schedule, use_seg_speeds, initial_trip_id=None):
     """This function creates the GTFS trip and stoptime entries for every trip.
 
     It requires route definitions linking route names to a definition of
@@ -176,7 +181,10 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
     stop_name_to_id_map = build_stop_name_to_id_map(schedule)
     # Initialise trip_id and counter
     # Need to check existing trip count so updates are right numbers
-    trip_ctr = len(schedule.trips)
+    if initial_trip_id:
+        trip_ctr = initial_trip_id
+    else:
+        trip_ctr = len(schedule.trips)
     # Do routes and directions as outer loops rather than service periods - as 
     # allows maximal pre-calculation
     sorted_route_defs = sorted(route_defs, key=route_segs.get_route_num)
@@ -480,18 +488,12 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time,
     return
 
 def get_partial_save_name(output_fname, ii):
-    fname = output_fname+".partial.%d.zip" % (ii % 2)
+    fname = output_fname+".partial.%d.zip" % ii #(ii % 2)
     return fname
 
 def process_data(route_defs_csv_fname, input_segments_fname,
         input_stops_fname, mode_config, output, use_seg_speeds,
         memory_db):
-    # Create our schedule
-    schedule = transitfeed.Schedule(memory_db=memory_db)
-    # Agency
-    schedule.AddAgency(mode_config['name'], mode_config['url'],
-        mode_config['loc'], agency_id=mode_config['id'])
-
     # Now see if we can open both needed shape files correctly
     route_defs = route_segs.read_route_defs(route_defs_csv_fname)
     route_segments_shp = osgeo.ogr.Open(input_segments_fname)
@@ -504,45 +506,71 @@ def process_data(route_defs_csv_fname, input_segments_fname,
         print "Error, stops shape file given, %s , failed to open." \
             % (input_stops_fname)
         sys.exit(1)
-    # Now do actual data processing
-    create_gtfs_route_entries(route_defs, mode_config, schedule)
-    create_gtfs_stop_entries(stops_shp, mode_config, schedule)
+
     partial_save_files = []
+    trips_total = 0
     for ii, r_start in enumerate(range(0, len(route_defs), \
             ROUTE_WRITE_BATCH_SIZE)):
+        # Create our schedule
+        schedule = transitfeed.Schedule(memory_db=memory_db)
+        # Agency
+        schedule.AddAgency(mode_config['name'], mode_config['url'],
+            mode_config['loc'], agency_id=mode_config['id'])
+        create_gtfs_service_periods(mode_config['services_info'], schedule)
+        create_gtfs_route_entries(route_defs, mode_config, schedule)
+        create_gtfs_stop_entries(stops_shp, mode_config, schedule)
         r_end = r_start + (ROUTE_WRITE_BATCH_SIZE-1)
         if r_end >= len(route_defs):
             r_end = len(route_defs)-1
         print "Processing routes %d to %d" % (r_start, r_end)
         create_gtfs_trips_stoptimes(route_defs[r_start:r_end+1],
             route_segments_shp, stops_shp, mode_config, schedule,
-            use_seg_speeds)
-        if r_end < len(route_defs)-1:
-            fname = get_partial_save_name(output, ii)
-            print "About to save timetable so far to file %s in case..." % fname
-            schedule.WriteGoogleTransitFeed(fname)
-            print "...finished writing."
-            if fname not in partial_save_files:
-                partial_save_files.append(fname)
-            #loader = transitfeed.Loader(feed_path=output_temp,
-            #    problems=transitfeed.ProblemReporter(),
-            #    memory_db=False,
-            #    load_stop_times=True)
-            #print "... and now re-opening from file...."
-            #schedule = loader.Load()
+            use_seg_speeds, initial_trip_id = trips_total)
+        trips_total += len(schedule.trips)
+        fname = get_partial_save_name(output, ii)
+        print "About to save timetable so far to file %s in case..." % fname
+        schedule.WriteGoogleTransitFeed(fname)
+        print "...finished writing."
+        if fname not in partial_save_files:
+            partial_save_files.append(fname)
+
+    # Now we want to re-combine the separate zip files together
+    # to create our master schedule
+    master_schedule = transitfeed.Schedule(memory_db=False)
+    master_schedule.AddAgency(mode_config['name'], mode_config['url'],
+        mode_config['loc'], agency_id=mode_config['id'])
+    create_gtfs_service_periods(mode_config['services_info'],
+        master_schedule)
+    create_gtfs_route_entries(route_defs, mode_config, master_schedule)
+    create_gtfs_stop_entries(stops_shp, mode_config, master_schedule)
     # Now close the shape files.
     stops_shp = None
     route_segments_shp = None
 
-    print "About to do final validate and write ...."
-    schedule.Validate()
-    schedule.WriteGoogleTransitFeed(output)
-    print "Written successfully to: %s" % output
-    print "Cleaning up temp save files."
+    # Load it up progressively from partial files.
     for fname in partial_save_files:
-        if os.path.exists(fname):
-            print "Deleting %s" % fname
-            os.unlink(fname)
+        loader = transitfeed.Loader(feed_path=fname,
+            problems=transitfeed.ProblemReporter(),
+            memory_db=memory_db,
+            load_stop_times=True)
+        print "... now re-opening partial file %s ...." % fname 
+        part_schedule = loader.Load()
+        for trip in part_schedule.trips.itervalues():
+            stop_times = trip.GetStopTimes()
+            master_schedule.AddTripObject(trip)
+            for stop_time in stop_times:
+                trip.AddStopTimeObject(stop_time)
+        part_schedule = None
+
+    print "About to do final validate and write ...."
+    master_schedule.Validate()
+    master_schedule.WriteGoogleTransitFeed(output)
+    print "Written successfully to: %s" % output
+    #print "Cleaning up temp save files."
+    #for fname in partial_save_files:
+    #    if os.path.exists(fname):
+    #        print "Deleting %s" % fname
+    #        os.unlink(fname)
 
 if __name__ == "__main__":
     allowedServs = ', '.join(sorted(["'%s'" % key for key in \
@@ -564,7 +592,7 @@ if __name__ == "__main__":
         help='Should the GTFS schedule use an in-memory DB, or file based one? '\
         'creating large GTFS schedules can be memory-hungry.')
     parser.set_defaults(output='google_transit.zip', usesegspeeds='True',
-        memorydb='False')
+        memorydb='True')
     (options, args) = parser.parse_args()
 
     if options.routedefs is None:
