@@ -1,5 +1,7 @@
 from datetime import datetime, date, time, timedelta
 
+TODAY = date.today()
+
 #Format:
 # avespeed: average speed (km/h)
 # headway: how often each hour a vehicle arrives
@@ -148,8 +150,8 @@ END_DATE_STR = '20141231'
 
 def calc_total_service_time_elapsed(serv_headways, curr_time):
     first_period_start_time = serv_headways[0][0]
-    tdiff = datetime.combine(date.today(), curr_time) \
-        - datetime.combine(date.today(), first_period_start_time)
+    tdiff = datetime.combine(TODAY, curr_time) \
+        - datetime.combine(TODAY, first_period_start_time)
     if tdiff < timedelta(0):
         tdiff += timedelta(days=1)
     return tdiff

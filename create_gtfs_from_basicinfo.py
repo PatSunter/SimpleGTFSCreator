@@ -14,7 +14,6 @@ import sys
 import os.path
 from operator import itemgetter
 
-import pyproj
 import osgeo.ogr
 from osgeo import ogr
 import transitfeed
@@ -26,6 +25,9 @@ import parser_utils
 
 # Will determine how much infor is printed.
 VERBOSE = False
+
+# Calc this once to save a bit of time as its used a lot
+TODAY = date.today()
 
 class Seq_Stop_Info:
     """A small struct to store key info about a stop in the sequence of a
@@ -203,9 +205,9 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
                     curr_period_inc = timedelta(0)
                     curr_period_start = serv_headways[curr_period][0]
                     curr_period_end = serv_headways[curr_period][1]
-                    period_duration = datetime.combine(date.today(), \
+                    period_duration = datetime.combine(TODAY, \
                         curr_period_end) - \
-                        datetime.combine(date.today(), curr_period_start)
+                        datetime.combine(TODAY, curr_period_start)
                     # This logic needed to handle periods that cross midnight
                     if period_duration < timedelta(0):
                         period_duration += timedelta(days=1)
@@ -227,29 +229,32 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
                         trip_ctr += 1
                         # Now update necessary variables ...
                         curr_period_inc += curr_headway
-                        next_start_time = (datetime.combine(date.today(), \
+                        next_start_time = (datetime.combine(TODAY, \
                             curr_start_time) + curr_headway).time()
                         curr_start_time = next_start_time
                     curr_period += 1
     return                            
 
-def calc_time_on_next_segment(seq_stop_info, mode_config, use_seg_speeds,
+def calc_time_on_next_segment_seg_speeds(seq_stop_info, mode_config,
         peak_status):
     """Calculates travel time between two stops. Current algorithm is based on
     an average speed on that segment, and physical distance between them."""
-    if use_seg_speeds is True:
-        if peak_status is True:
-            seg_speed = seq_stop_info.peak_speed_next
-        else:
-            seg_speed = seq_stop_info.free_speed_next
-    else:    
-        seg_speed = mode_config['avespeed']
+    if peak_status is True:
+        seg_speed = seq_stop_info.peak_speed_next
+    else:
+        seg_speed = seq_stop_info.free_speed_next
     time_hrs = seq_stop_info.dist_km_to_next / float(seg_speed)
-    time_inc = timedelta(hours = time_hrs)
-    # Now round to nearest second
-    time_inc = time_inc - timedelta(microseconds=time_inc.microseconds) + \
-        timedelta(seconds=round(time_inc.microseconds/1e6))
-    return time_inc
+    # Need to round this to nearest second and return as a timedelta.
+    return timedelta(seconds=round(time_hrs * 3600))
+        
+def calc_time_on_next_segment_no_seg_speeds(seq_stop_info, mode_config,
+        peak_status):
+    """Calculates travel time between two stops. Current algorithm is based on
+    an average speed on that segment, and physical distance between them."""
+    seg_speed = mode_config['avespeed']
+    time_hrs = seq_stop_info.dist_km_to_next / float(seg_speed)
+    # Need to round this to nearest second and return as a timedelta.
+    return timedelta(seconds=round(time_hrs * 3600))
     
 # Deprecated! Don't use, very slow.
 def _get_gtfs_stop_byname(stop_name, schedule):
@@ -384,6 +389,11 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time,
     since we are allowing for time-dependent vehicle speeds by serv period.
     Still uses pre-calculated list of stops, segments along a route."""
 
+    if use_seg_speeds:
+        calc_time_on_next_segment_func = calc_time_on_next_segment_seg_speeds
+    else:
+        calc_time_on_next_segment_func = calc_time_on_next_segment_no_seg_speeds
+
     if VERBOSE:
         print "\n%s() called on route '%s', trip_id = %d, trip start time %s"\
             % (inspect.stack()[0][3], route_def["name"], trip.trip_id,\
@@ -398,8 +408,8 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time,
     # it will handle trips that cross midnight the way GTFS requires
     # (as a number that can increases past 24:00 hours,
     # rather than ticking back to 00:00)
-    start_time_delta = datetime.combine(date.today(), trip_start_time) - \
-        datetime.combine(date.today(), time(0))
+    start_time_delta = datetime.combine(TODAY, trip_start_time) - \
+        datetime.combine(TODAY, time(0))
     cumulative_time_on_trip = timedelta(0)
     # These variable needed to track change in periods for possible
     # time-dependent vehicle speed in peak or off-peak
@@ -455,8 +465,7 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time,
             
         # Only have to do time inc. calculations if more stops remaining.
         if (stop_seq+1) < n_stops_on_route:
-            time_inc = calc_time_on_next_segment(s_info, mode_config,
-                use_seg_speeds, peak_status)
+            time_inc = calc_time_on_next_segment_func(s_info, mode_config, peak_status)
             cumulative_time_on_trip += time_inc
     return
 
