@@ -29,6 +29,8 @@ VERBOSE = False
 # Calc this once to save a bit of time as its used a lot
 TODAY = date.today()
 
+ROUTE_WRITE_BATCH_SIZE = 10
+
 class Seq_Stop_Info:
     """A small struct to store key info about a stop in the sequence of a
     particular route, pulled from the Shapefiles, that will be later used
@@ -73,8 +75,8 @@ def create_gtfs_route_entries(route_defs, mode_config, schedule):
     # Routes
     sorted_route_defs = sorted(route_defs, key=route_segs.get_route_num)
     for ii, route_def in enumerate(sorted_route_defs):
-        route_long_name = route_def["name"]
-        route_short_name = None
+        route_long_name = None#route_def["name"]
+        route_short_name = route_def["name"]
         route_description = None
         route_id = str(mode_config['index'] + ii)
         route = transitfeed.Route(
@@ -84,7 +86,7 @@ def create_gtfs_route_entries(route_defs, mode_config, schedule):
             route_id = route_id
             )
         print "Adding route with ID %s, name '%s'" % \
-            (route_id, route_long_name)
+            (route_id, route_short_name)
         schedule.AddRouteObject(route)
 
 def create_gtfs_stop_entries(stops_shapefile, mode_config, schedule):
@@ -150,6 +152,12 @@ def add_service_period(days_week_str, schedule):
     schedule.AddServicePeriodObject(service_period, validate=False)
     return service_period
 
+def build_route_name_to_id_map(schedule):
+    route_name_to_id_map = {}
+    for route_id, route in schedule.routes.iteritems():
+        route_name_to_id_map[route.route_short_name] = route_id
+    return route_name_to_id_map
+
 def build_stop_name_to_id_map(schedule):
     stop_name_to_id_map = {}
     for stop_id, stop in schedule.stops.iteritems():
@@ -164,15 +172,17 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
     segments in a shapefile.
     """ 
     # Build this now for fast lookups.
+    route_name_to_id_map = build_route_name_to_id_map(schedule)
     stop_name_to_id_map = build_stop_name_to_id_map(schedule)
     # Initialise trip_id and counter
-    trip_ctr = 0
+    # Need to check existing trip count so updates are right numbers
+    trip_ctr = len(schedule.trips)
     # Do routes and directions as outer loops rather than service periods - as 
     # allows maximal pre-calculation
     sorted_route_defs = sorted(route_defs, key=route_segs.get_route_num)
     for ii, route_def in enumerate(sorted_route_defs):
         print "Adding trips and stops for route '%s'" % (route_def['name'])
-        gtfs_route_id = str(mode_config['index'] + ii)
+        gtfs_route_id = route_name_to_id_map[route_def['name']]
         #Re-grab the route entry from our GTFS schedule
         route = schedule.GetRoute(gtfs_route_id)
         # For our basic scheduler, we're going to just create both trips in
@@ -469,6 +479,10 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time,
             cumulative_time_on_trip += time_inc
     return
 
+def get_partial_save_name(output_fname, ii):
+    fname = output_fname+".partial.%d.zip" % (ii % 2)
+    return fname
+
 def process_data(route_defs_csv_fname, input_segments_fname,
         input_stops_fname, mode_config, output, use_seg_speeds):
     # Create our schedule
@@ -492,14 +506,42 @@ def process_data(route_defs_csv_fname, input_segments_fname,
     # Now do actual data processing
     create_gtfs_route_entries(route_defs, mode_config, schedule)
     create_gtfs_stop_entries(stops_shp, mode_config, schedule)
-    create_gtfs_trips_stoptimes(route_defs, route_segments_shp,
-        stops_shp, mode_config, schedule, use_seg_speeds)
+    partial_save_files = []
+    for ii, r_start in enumerate(range(0, len(route_defs), \
+            ROUTE_WRITE_BATCH_SIZE)):
+        r_end = r_start + (ROUTE_WRITE_BATCH_SIZE-1)
+        if r_end >= len(route_defs):
+            r_end = len(route_defs)-1
+        print "Processing routes %d to %d" % (r_start, r_end)
+        create_gtfs_trips_stoptimes(route_defs[r_start:r_end+1],
+            route_segments_shp, stops_shp, mode_config, schedule,
+            use_seg_speeds)
+        if r_end < len(route_defs)-1:
+            fname = get_partial_save_name(output, ii)
+            print "About to save timetable so far to file %s in case..." % fname
+            schedule.WriteGoogleTransitFeed(fname)
+            print "...finished writing."
+            if fname not in partial_save_files:
+                partial_save_files.append(fname)
+            #loader = transitfeed.Loader(feed_path=output_temp,
+            #    problems=transitfeed.ProblemReporter(),
+            #    memory_db=False,
+            #    load_stop_times=True)
+            #print "... and now re-opening from file...."
+            #schedule = loader.Load()
     # Now close the shape files.
     stops_shp = None
     route_segments_shp = None
 
+    print "About to do final validate and write ...."
     schedule.Validate()
     schedule.WriteGoogleTransitFeed(output)
+    print "Written successfully to: %s" % output
+    print "Cleaning up temp save files."
+    for fname in partial_save_files:
+        if os.path.exists(fname):
+            print "Deleting %s" % fname
+            os.unlink(fname)
 
 if __name__ == "__main__":
     allowedServs = ', '.join(sorted(["'%s'" % key for key in \
