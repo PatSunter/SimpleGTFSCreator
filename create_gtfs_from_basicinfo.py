@@ -148,6 +148,11 @@ def add_service_period(days_week_str, schedule):
     schedule.AddServicePeriodObject(service_period, validate=False)
     return service_period
 
+def build_stop_name_to_id_map(schedule):
+    stop_name_to_id_map = {}
+    for stop_id, stop in schedule.stops.iteritems():
+        stop_name_to_id_map[stop.stop_name] = stop_id
+    return stop_name_to_id_map
 
 def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
         mode_config, schedule, use_seg_speeds):
@@ -156,7 +161,8 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
     It requires route definitions linking route names to a definition of
     segments in a shapefile.
     """ 
-
+    # Build this now for fast lookups.
+    stop_name_to_id_map = build_stop_name_to_id_map(schedule)
     # Initialise trip_id and counter
     trip_ctr = 0
     # Do routes and directions as outer loops rather than service periods - as 
@@ -166,8 +172,7 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
         print "Adding trips and stops for route '%s'" % (route_def['name'])
         gtfs_route_id = str(mode_config['index'] + ii)
         #Re-grab the route entry from our GTFS schedule
-        route = [r for r in schedule.GetRouteList() \
-            if r.route_id == gtfs_route_id][0]
+        route = schedule.GetRoute(gtfs_route_id)
         # For our basic scheduler, we're going to just create both trips in
         # both directions, starting at exactly the same time, at the same
         # frequencies. The real-world implication of this is at least
@@ -180,7 +185,7 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
             # This way we do this just once per route and direction.
             prebuilt_stop_info_list = build_stop_list_and_seg_info_along_route(
                 route_def, dir_id, route_segments_shp, stops_shp,
-                mode_config, schedule, use_seg_speeds)
+                mode_config, schedule, use_seg_speeds, stop_name_to_id_map)
             
             # N.B.: Possible we might want to convert
             # the services_info of headway periods to a configurable per-route 
@@ -246,19 +251,8 @@ def calc_time_on_next_segment(seq_stop_info, mode_config, use_seg_speeds,
         timedelta(seconds=round(time_inc.microseconds/1e6))
     return time_inc
     
-def get_gtfs_stop_id(stop_id, mode_config):
-    return str(mode_config['index'] + stop_id)
-
-def get_gtfs_stop_byid(stop_id_gtfs, schedule):
-    try:
-        stop = [s for s in schedule.GetStopList() if s.stop_id == stop_id_gtfs][0]
-    except IndexError:
-        print "Error: seems like stop with ID %d isn't yet in GTFS " \
-            "stops DB." % stop_id_gtfs
-        sys.exit(1)
-    return stop 
-
-def get_gtfs_stop_byname(stop_name, schedule):
+# Deprecated! Don't use, very slow.
+def _get_gtfs_stop_byname(stop_name, schedule):
     try:
         stop = [s for s in schedule.GetStopList() if s.stop_name == stop_name][0]
     except IndexError:
@@ -297,7 +291,7 @@ def get_stop_order(segment, next_seg):
     return first_stop_name, second_stop_name
 
 def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_shp,
-        stops_shp, mode_config, schedule, use_seg_speeds):
+        stops_shp, mode_config, schedule, use_seg_speeds, stop_name_to_id_map):
 
     prebuilt_stop_info_list = []
     route_segments_lyr = route_segments_shp.GetLayer(0)
@@ -356,10 +350,9 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
             second_stop_name = tp_model.get_other_stop_name(seg_feature,
                 first_stop_name)
 
-        # NB: temporarily searching by name.
-        #first_stop_id_gtfs = get_gtfs_stop_id(first_stop_id, mode_config)
-        #first_stop = get_gtfs_stop_byid(first_stop_id_gtfs, schedule)
-        first_stop = get_gtfs_stop_byname(first_stop_name, schedule)
+        
+        first_stop_id_gtfs = stop_name_to_id_map[first_stop_name]
+        first_stop = schedule.GetStop(first_stop_id_gtfs)
         s_info = Seq_Stop_Info(first_stop)
         # We are still going to save key info now, to save accessing the
         # shapefile layers again unnecessarily later.
@@ -372,9 +365,8 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
     # Now we've exited from the loop :- we need to now add a final stop for
     # the second stop in the final segment in the direction we're travelling.
     # second_stop_id should be set correctly from last run thru above loop.
-    #final_stop_id_gtfs = get_gtfs_stop_id(second_stop_id, mode_config)
-    #final_stop = get_gtfs_stop_byid(final_stop_id_gtfs, schedule)
-    final_stop = get_gtfs_stop_byname(second_stop_name, schedule)
+    final_stop_id_gtfs = stop_name_to_id_map[second_stop_name]
+    final_stop = schedule.GetStop(final_stop_id_gtfs)
     s_info_final = Seq_Stop_Info(final_stop)
     # Final stop doesn't have speed etc on segment, so leave as zero.
     prebuilt_stop_info_list.append(s_info_final)
