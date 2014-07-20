@@ -501,15 +501,16 @@ def process_data(route_defs_csv_fname, input_segments_fname,
     schedule.WriteGoogleTransitFeed(output)
 
 if __name__ == "__main__":
-
+    allowedServs = ', '.join(sorted(["'%s'" % key for key in \
+        m_t_info.settings.keys()]))
     parser = OptionParser()
     parser.add_option('--routedefs', dest='routedefs', 
         help='CSV file listing name, directions, and segments of each route.')
     parser.add_option('--segments', dest='inputsegments', help='Shapefile '\
         'of line segments.')
     parser.add_option('--stops', dest='inputstops', help='Shapefile of stops.')
-    parser.add_option('--service', dest='service', help="Should be 'train', "\
-        "'tram' or 'bus'.")
+    parser.add_option('--service', dest='service',
+        help="Should be one of %s" % allowedServs)
     parser.add_option('--output', dest='output', help='Path of output file. '\
         'Should end in .zip')
     parser.add_option('--usesegspeeds', dest='usesegspeeds', 
@@ -529,7 +530,12 @@ if __name__ == "__main__":
         parser.error("No stops shapefile path given.")
     if options.service is None:
         parser.print_help()
-        parser.error("Need to specify a service.")
+        parser.error("No service option requested. Should be one of %s" \
+            % (allowedServs))
+    if options.service not in m_t_info.settings:
+        parser.print_help()
+        parser.error("Service option requested '%s' not in allowed set, of %s" \
+            % (options.service, allowedServs))
 
     use_seg_speeds = parser_utils.str2bool(options.usesegspeeds)
 
