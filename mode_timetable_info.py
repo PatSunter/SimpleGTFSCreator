@@ -161,3 +161,9 @@ def calc_service_time_elapsed_end_period(serv_headways, period_num):
         serv_headways[period_num][1])
     return tdiff
 
+def get_freq_at_time(service_headways, time_of_day):
+    for headway_period in service_headways:
+        if time_of_day >= headway_period[0] and \
+            time_of_day <= headway_period[1]:
+            return headway_period[2]
+    return None
