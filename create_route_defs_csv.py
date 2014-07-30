@@ -81,11 +81,9 @@ def order_based_on_links(rsegtuples, seglinks):
         sys.exit(1)    
     return ordered_segtuples
 
-def process_all_routes(input_shp_fname, output_fname):
-    shapefile = osgeo.ogr.Open(input_shp_fname)
-    layer = shapefile.GetLayer(0)
+def get_routes_and_segments(segs_lyr):
     all_routes = {}
-    for feature in layer:
+    for feature in segs_lyr:
         seg_id = int(feature.GetField(tp_model.SEG_ID_FIELD))
         seg_routes = feature.GetField(tp_model.SEG_ROUTE_LIST_FIELD)
         pt_a = feature.GetField(tp_model.SEG_STOP_1_NAME_FIELD)
@@ -97,19 +95,26 @@ def process_all_routes(input_shp_fname, output_fname):
                 all_routes[route] = [segtuple]
             else:
                 all_routes[route].append(segtuple)
-
     #for rname, rsegs in all_routes.iteritems():
     #    print "For Route '%s': segments are %s" % (rname, rsegs)    
+    return all_routes
 
-    print "(A total of %d routes.)" % len(all_routes)
+def get_route_names_sorted(route_defs):
+    # Get an ordered list of route names so we can write in name order,
+    # Dropping the 'R' for route.
+    rnames_sorted = sorted(route_defs.keys(), key=lambda s: int(s[1:]))
+    return rnames_sorted
 
+def order_route_segments(all_routes, rnames_sorted=None):
     # Now order each route properly ...
     # for each route - find unique stop names 
+    if rnames_sorted == None:
+        rnames_sorted = get_route_names_sorted(all_routes)
     routes_ordered = {}
     route_dirs = {}
-    for rname, rsegtuples in all_routes.iteritems():
-        print "Processing route '%s'" % rname
-
+    for rname in rnames_sorted:
+        print "Ordering segments by traversal for route '%s'" % rname
+        rsegtuples = all_routes[rname]
         if len(rsegtuples) == 1:
             routes_ordered[rname] = rsegtuples
             continue
@@ -130,19 +135,32 @@ def process_all_routes(input_shp_fname, output_fname):
         dir1 = "%s->%s" % (startstop, endstop)
         dir2 = "%s->%s" % (endstop, startstop)
         route_dirs[rname] = (dir1, dir2)
+    assert len(routes_ordered) == len(all_routes)
+    return routes_ordered, route_dirs
 
+def process_all_routes(input_shp_fname, output_fname):
+    shapefile = osgeo.ogr.Open(input_shp_fname)
+    segs_lyr = shapefile.GetLayer(0)
+    all_routes = get_routes_and_segments(segs_lyr)
+    print "(A total of %d routes.)" % len(all_routes)
+    rnames_sorted = get_route_names_sorted(all_routes)
+    routes_ordered, route_dirs = order_route_segments(all_routes, rnames_sorted)
+
+    # Now write out to file.
     routesfile = open(output_fname, 'w')
     rwriter = csv.writer(routesfile, delimiter=';')
     rwriter.writerow(['Route','dir1','dir2','Segments'])
 
-    for rname, rsegtuples in routes_ordered.iteritems():
+    for rname in rnames_sorted:
+        dirs = route_dirs[rname]
+        rsegtuples = routes_ordered[rname]
         segstrs = [str(segtuple[0]) for segtuple in rsegtuples]
         segstr = ','.join(segstrs)
-        dirs = route_dirs[rname]
         rwriter.writerow([rname,dirs[0],dirs[1],segstr])
 
     routesfile.close()
     print "Wrote output to %s" % (output_fname)
+    shapefile.Destroy()
 
 if __name__ == "__main__":    
     parser = OptionParser()
