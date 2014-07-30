@@ -85,10 +85,9 @@ def get_routes_and_segments(segs_lyr):
     all_routes = {}
     for feature in segs_lyr:
         seg_id = int(feature.GetField(tp_model.SEG_ID_FIELD))
-        seg_routes = feature.GetField(tp_model.SEG_ROUTE_LIST_FIELD)
         pt_a = feature.GetField(tp_model.SEG_STOP_1_NAME_FIELD)
         pt_b = feature.GetField(tp_model.SEG_STOP_2_NAME_FIELD)
-        seg_rlist = seg_routes.split(',')
+        seg_rlist = tp_model.get_routes_on_seg(feature)
         segtuple = (seg_id, pt_a, pt_b)
         for route in seg_rlist:
             if route not in all_routes:

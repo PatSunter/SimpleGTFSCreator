@@ -132,6 +132,12 @@ def get_distance_km(seg_feature):
     rdist = rdist / ROUTE_DIST_RATIO_TO_KM
     return rdist
 
+def get_routes_on_seg(seg_feature):
+    seg_routes = seg_feature.GetField(SEG_ROUTE_LIST_FIELD)
+    rlist = seg_routes.split(',')
+    assert len(rlist) > 0
+    return rlist
+
 # These get() funcs below were originally in create_gtfs_from_basicinfo.py
 def get_stop_feature_name(feature, stop_prefix):
     stop_id = feature.GetField(STOP_NAME_FIELD)
