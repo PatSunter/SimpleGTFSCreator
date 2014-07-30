@@ -35,8 +35,16 @@ def get_route_length(route_def, segs_lookup_dict):
     return rlength
 
 def get_route_shared_sections_bus(route_def, segs_lookup_dict):
-    #TODO!
-    return {}    
+    shared_len = 0
+    shared_lens_by_route = {}
+    for segtuple in route_def:
+        seg_id = segtuple[0]
+        seg_feat = segs_lookup_dict[seg_id]
+        seg_rlist = tp_model.get_routes_on_seg(seg_feat)
+        if len(seg_rlist) > 1:
+            dist_km = tp_model.get_distance_km(seg_feat)
+            shared_len += dist_km
+    return shared_len, shared_lens_by_route
 
 def calc_time_on_route_peak(route_def, segs_lookup_dict):
     rtime = timedelta(0)
@@ -52,12 +60,30 @@ def get_minutes(t_delta):
     return t_delta.days * 60 * 24 + t_delta.seconds / 60 \
         + t_delta.microseconds / 1e6 / 60
 
-def calc_buses_needed_for_route(route_trav_time, mode_config):
+def calc_buses_needed_for_route_conservative_bidir(
+        route_trav_time, mode_config):
+    # This approach based on assuming need to start both route directions
+    # simultaneously at the start.
     service_headways = mode_config['services_info'][0][1]
     freq_in_peak = m_t_info.get_freq_at_time(service_headways, MORNING_PEAK)
     route_time_min = get_minutes(route_trav_time)
     buses_needed = 2 * math.ceil(route_time_min / float(freq_in_peak))
     return buses_needed
+
+def calc_buses_needed_for_route_with_recovery_time(
+        route_trav_time, mode_config):
+    # Formula in this func based on that at http://www.transitmix.net
+    RECOVERY_TIME_PERCENT = 10
+    service_headways = mode_config['services_info'][0][1]
+    freq_in_peak = m_t_info.get_freq_at_time(service_headways, MORNING_PEAK)
+    route_time_min = get_minutes(route_trav_time)
+    bidir_route_time_with_rec = 2 * route_time_min \
+        * (100+RECOVERY_TIME_PERCENT)/100
+    buses_needed = math.ceil(bidir_route_time_with_rec / float(freq_in_peak))
+    return buses_needed
+
+calc_buses_needed_for_route = calc_buses_needed_for_route_with_recovery_time
+#calc_buses_needed_for_route = calc_buses_needed_for_route_conservative_bidir
 
 def get_all_route_infos(segs_lyr, mode_config):
     segs_lookup_dict = tp_model.build_segs_lookup_table(segs_lyr)
@@ -67,17 +93,27 @@ def get_all_route_infos(segs_lyr, mode_config):
         rnames_sorted)
 
     route_lengths = {}
-    route_shared_sections_bus = {}
+    route_shared_section_lengths = {}
+    route_shared_section_lengths_by_route = {}
     for rname in rnames_sorted:
         route_def = routes_ordered[rname]
         route_lengths[rname] = get_route_length(route_def, segs_lookup_dict)
-        route_shared_sections_bus[rname] = get_route_shared_sections_bus(
+        shared_len, shared_lens_by_route = get_route_shared_sections_bus(
             route_def, segs_lookup_dict)
-        # TODO:- get_route_shared_sections_tram()    
+        route_shared_section_lengths[rname] = shared_len
+        route_shared_section_lengths_by_route[rname] = shared_lens_by_route
+        # TODO:- get_route_shared_sections_tram()
 
-    #print "Route lengths:"
-    #for rname in rnames_sorted:
-    #    print "%s: %.2fkm" % (rname, route_lengths[rname])
+    print "Route lengths for %d routes:" % len(rnames_sorted)
+    for rname in rnames_sorted:
+        print "%s: %.2fkm" % (rname, route_lengths[rname])
+    tot_dist = sum(route_lengths.values())
+    print "\nTotal route dist: %.2fkm (%.2fkm if bi-directional)" \
+        % (tot_dist, tot_dist * 2)
+    tot_multi_route = sum(route_shared_section_lengths.values())
+    tot_single_route = tot_dist - tot_multi_route
+    print "Of this dist, %.2fkm is single-route, %.2fkm is multi-route." \
+        % (tot_single_route, tot_multi_route)
 
     route_trav_times = {}
     buses_needed = {}
@@ -89,12 +125,12 @@ def get_all_route_infos(segs_lyr, mode_config):
         buses_needed[rname] = calc_buses_needed_for_route(route_trav_time,
             mode_config)
 
-    print "Route trav times in peak and est. buses needed:"
+    print "Route trav times in peak and est. buses needed:" 
     for rname in rnames_sorted:
         print "%s: %s, %d" % (rname, route_trav_times[rname],
             buses_needed[rname])
-    print "\nTotal estimated buses needed in peak: %d" \
-        % (sum(buses_needed.values()))
+    print "\nTotal estimated buses needed in peak for the %d routes: %d" \
+        % (len(rnames_sorted), sum(buses_needed.values()))
 
 def main():
     allowedServs = ', '.join(sorted(["'%s'" % key for key in \
