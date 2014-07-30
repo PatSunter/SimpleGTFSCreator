@@ -143,7 +143,8 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
                         if last_stop.GetField(tp_model.STOP_TYPE_FIELD) != \
                                 tp_model.STOP_TYPE_ROUTE_START_END:
                             print "WARNING: for route %s, last stop found wasn't "\
-                                "of type %s." % tp_model.STOP_TYPE_ROUTE_START_END
+                                "of type %s." % \
+                                (rname, tp_model.STOP_TYPE_ROUTE_START_END)
                     except ValueError:
                         # Legacy stop sets like motorways don't always have
                         # these fields.
