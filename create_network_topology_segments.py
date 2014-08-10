@@ -177,8 +177,15 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
                 next_stop_i = isect_map[next_stop_i_in_route_set]
                 last_stop = input_stops_lyr.GetFeature(last_stop_i)
                 next_stop = input_stops_lyr.GetFeature(next_stop_i)
-                last_stop_id = last_stop.GetField(tp_model.STOP_ID_FIELD)
-                next_stop_id = next_stop.GetField(tp_model.STOP_ID_FIELD)
+                try:
+                    last_stop_id = last_stop.GetField(tp_model.STOP_ID_FIELD)
+                    next_stop_id = next_stop.GetField(tp_model.STOP_ID_FIELD)
+                except ValueError:
+                    print "Error: a stop found on this route ('%s') is "\
+                        "missing the ID field in shapefile, '%s'. Check "\
+                        "your shapefile has correct fields/values."\
+                        % (rname, tp_model.STOP_ID_FIELD)
+                    sys.exit(1)    
                 if dist_to_next == 0.0:
                     # Two stops on same position (bad). Skip one of them.
                     if last_stop_id_before_skipping == None:
