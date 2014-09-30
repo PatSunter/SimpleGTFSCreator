@@ -300,10 +300,27 @@ def build_stop_visit_times_by_dir_serv_period(trip_dict, p_keys,
                 all_patterns_entry[s_id].sort()
     return all_patterns_stop_visit_times
 
-def routeDirStringToFileReady(route_dir):
-    return route_dir.replace(' ','_').replace('(','').replace(')','')
+def to_file_ready_string(in_string):
+    out_string = in_string.replace(' ','_').replace('(','').replace(')','')
+    out_string = out_string.replace('/','_').replace('\\','')
+    return out_string
 
-# TODO: would be good to allow optional argument to provide a seg_geom here, in which
+def routeDirStringToFileReady(route_dir):
+    return to_file_ready_string(route_dir)
+
+def routeNameFileReady(route):
+    route_name_file_string = ""
+    short_name = route.route_short_name
+    if short_name:
+        route_name_file_string += to_file_ready_string(short_name)
+        route_name_file_string += "-"
+    long_name = route.route_long_name
+    if long_name:
+        route_name_file_string += to_file_ready_string(long_name)
+    return route_name_file_string
+
+# TODO: would be good to allow optional argument to provide a seg_geom here,
+# in which
 # case this is used to calculate the actual distance along seg geom (rather
 # than straight-line distance along surface of the earth)??
 def calc_distance(gtfs_stop_a, gtfs_stop_b):
@@ -536,11 +553,12 @@ def extract_route_speed_info_by_time_periods(schedule, route_name,
             route_avg_speeds_during_time_periods[dir_period_pair] = avg_speeds
 
     # write to relevant files.
+    route_name_file_ready = routeNameFileReady(r_info)
     for route_dir, serv_period in route_dir_serv_periods:
             avg_speeds = route_avg_speeds_during_time_periods[\
                 (route_dir, serv_period)]
             fname_all = "%s-speeds-%s-%s-all.csv" % \
-                (route_name, serv_period, \
+                (route_name_file_ready, serv_period, \
                 routeDirStringToFileReady(route_dir))
             fpath = os.path.join(output_path, fname_all)
             writeAvgSpeedsOnSegments(schedule, avg_speeds,
@@ -568,6 +586,8 @@ def extract_route_freq_info_by_time_periods(schedule, route_name,
     
     route_dir_serv_periods = extract_route_dir_serv_period_tuples(trip_dict)
 
+    route_name_file_ready = routeNameFileReady(r_info)
+
     for p_ii, p_key in enumerate(p_keys):
         trips = trip_dict[p_keys[p_ii]]
         trips_dir = trips[0]['trip_headsign']
@@ -580,8 +600,8 @@ def extract_route_freq_info_by_time_periods(schedule, route_name,
         for serv_period, stop_visit_times in stop_visit_times_by_p.iteritems(): 
             period_headways = calcHeadwaysMinutes(schedule, stop_visit_times, time_periods)
             fname = "%s-hways-p%d-%s-%s.csv" % \
-                (route_name, p_ii, routeDirStringToFileReady(trips_dir),
-                    serv_period)
+                (route_name_file_ready, p_ii,
+                    routeDirStringToFileReady(trips_dir), serv_period)
             fpath = os.path.join(output_path, fname)
             writeHeadwaysMinutes(schedule, period_headways, time_periods,
                 fpath, stop_id_order=master_stop_ids)
@@ -603,7 +623,7 @@ def extract_route_freq_info_by_time_periods(schedule, route_name,
             stop_write_order = all_patterns_nominal_orders[\
                 (route_dir,serv_period)]
             fname_all = "%s-hways-%s-%s-all.csv" % \
-                (route_name, serv_period, \
+                (route_name_file_ready, serv_period, \
                 routeDirStringToFileReady(route_dir))
             fpath = os.path.join(output_path, fname_all)
             writeHeadwaysMinutes(schedule, period_headways,
