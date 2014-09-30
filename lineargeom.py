@@ -6,6 +6,8 @@ from math import radians, cos, sin, asin, sqrt
 import osgeo.ogr
 from osgeo import ogr, osr
 
+from misc_utils import pairs
+
 """These functions are to help perform basic linear geometry operations on
 polylines - of the sort that PostGIS would be able to do for example.
 
@@ -15,27 +17,6 @@ http://gis.stackexchange.com/questions/396/nearest-neighbor-between-a-point-laye
 And also:
 http://gis.stackexchange.com/questions/4022/looking-for-a-pythonic-way-to-calculate-the-length-of-a-wkt-linestring
 """
-
-# pairs iterator:
-# http://stackoverflow.com/questions/1257413/1257446#1257446
-def pairs(lst, loop=False):
-    i = iter(lst)
-    first = prev = i.next()
-    for item in i:
-        yield prev, item
-        prev = item
-    if loop == True:
-        yield item, first
-
-# A reversed version of the above pairs iterator.
-def reverse_pairs(lst, loop=False):
-    i = reversed(lst)
-    first = prev = i.next()
-    for item in i:
-        yield prev, item
-        prev = item
-    if loop == True:
-        yield item, first
 
 # these methods rewritten from the C version of Paul Bourke's
 # geometry computations:
