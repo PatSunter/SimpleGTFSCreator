@@ -19,8 +19,11 @@ def main():
         'Should end in .zip')
     parser.add_option('--output', dest='output', help='Path of output file. '\
         'Should end in .zip')
-    parser.add_option('--routes', dest='route_names', 
-        help='Names of routes to subset and copy, comma-separated.')
+    parser.add_option('--route_short_names', dest='route_short_names', 
+        help='Names of route short names to subset and copy, comma-separated.')
+    parser.add_option('--route_long_names', dest='route_long_names', 
+        help='Names of route long names to subset and copy, comma-separated.')
+    parser.set_defaults(route_short_names='', route_long_names='')
     (options, args) = parser.parse_args()
 
     if options.inputgtfs is None:
@@ -28,16 +31,18 @@ def main():
         parser.error("No input GTFS file given.") 
     if options.output is None:
         parser.print_help()
-        parser.error("No input GTFS file given.") 
-    if options.route_names is None:
+        parser.error("No output GTFS file given.") 
+    if not options.route_short_names and not options.route_long_names:
         parser.print_help()
-        parser.error("No route names list given to subset.") 
+        parser.error("No route names list (either short or long) given to subset.")
 
     gtfs_input_fname = options.inputgtfs
     gtfs_output_fname = options.output
 
-    route_names = parser_utils.getlist(options.route_names) 
-    #route_names = ['Upfield', 'Pakenham']
+    route_short_names = parser_utils.getlist(options.route_short_names)
+    route_long_names = parser_utils.getlist(options.route_long_names)
+    #route_short_names = None
+    #route_long_names = ['Upfield', 'Pakenham']
 
     accumulator = transitfeed.SimpleProblemAccumulator()
     problemReporter = transitfeed.ProblemReporter(accumulator)
@@ -65,7 +70,8 @@ def main():
         output_schedule.AddServicePeriodObject(serv_period_cpy)
 
     # Now :- we just copy across trip times for routes we're interested in.
-    gtfs_ops.copy_selected_routes(input_schedule, output_schedule, route_names)
+    gtfs_ops.copy_selected_routes(input_schedule, output_schedule,
+        route_short_names, route_long_names)
 
     input_schedule = None
     print "About to do output schedule validate and write ...."

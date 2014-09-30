@@ -103,10 +103,39 @@ def getRouteByLongName(schedule, long_name):
 
 # Tools for manipulating a schedule, and/or adding to a new schedule.
 
-def copy_selected_routes(input_schedule, output_schedule, route_names):
-    for route_name in route_names:
-        print "Now creating entry for route '%s'" % route_name
+def copy_selected_routes(input_schedule, output_schedule,
+        route_short_names, route_long_names):
+
+    routes_to_copy = []
+    for route_name in route_short_names:
+        r_id, route = getRouteByShortName(input_schedule, route_name)
+        if r_id is None:
+            print "Warning:- route with short name '%s' requested to copy not "\
+                "found, skipping." % (route_name)
+            route_name
+        else:
+            if r_id in [r[0] for r in routes_to_copy]:
+                print "Warning:- you already asked to copy route with "\
+                    "short name '%s' (ID '%d')." % route_name
+            else:
+                routes_to_copy.append((route_name, r_id, route))
+    
+    for route_name in route_long_names:
         r_id, route = getRouteByLongName(input_schedule, route_name)
+        if r_id is None:
+            print "Warning:- route with long name '%s' requested to copy not "\
+                "found, skipping." % (route_name)
+            route_name
+        else:
+            if r_id in [r[0] for r in routes_to_copy]:
+                print "Warning:- you already asked to copy route with "\
+                    "long name '%s' (ID '%d')." % route_name
+            else:
+                routes_to_copy.append((route_name, r_id, route))
+    
+    for route_name, r_id, route in routes_to_copy:
+        print "Now creating entry for route '%s'" % route_name
+        assert r_id is not None and route is not None
         route_cpy = copy.copy(route)
         route_cpy._schedule = None
         route_cpy._trips = []
