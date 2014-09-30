@@ -95,11 +95,17 @@ def printTripInfoForStops(stop_ids):
 
 # General Access helper functions
 
+def getRouteByShortName(schedule, short_name):
+    for r_id, route in schedule.routes.iteritems():
+        if route.route_short_name == short_name:
+            return r_id, route
+    return None, None
+
 def getRouteByLongName(schedule, long_name):
     for r_id, route in schedule.routes.iteritems():
         if route.route_long_name == long_name:
             return r_id, route
-    return None, None        
+    return None, None
 
 # Tools for manipulating a schedule, and/or adding to a new schedule.
 
