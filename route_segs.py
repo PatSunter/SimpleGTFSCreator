@@ -6,6 +6,7 @@ topology_shapefile_data_model.py for more."""
 
 import sys
 import csv
+import re
 
 class Seg_Reference:
     """A small lightweight class for using as an in-memory storage of key segment
@@ -69,7 +70,9 @@ def add_update_seg_ref(start_stop_id, end_stop_id,
 
 
 def get_route_num(routeDictEntry):
-    return int(routeDictEntry['name'][1:])
+    rname = routeDictEntry['name']
+    # Courtesy http://stackoverflow.com/questions/4289331/python-extract-numbers-from-a-string
+    return int(re.findall(r'\d+', rname)[0])
 
 # TODO: Modify this to create lists using the new seg_reference above?
 def read_route_defs(csv_file_name, do_sort=True):
