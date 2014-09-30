@@ -14,7 +14,12 @@ import csv
 
 import transitfeed
 
+from misc_utils import pairs
+import lineargeom
+
 SEC_PER_DAY = 86400
+
+DEFAULT_FALLBACK_SEG_SPEED_KM_H = 10.0
 
 # Converting transitfeed's basic time representation, to Python times,
 #   and vice-versa
@@ -193,32 +198,10 @@ def getPeriodHeadways(period_visit_counts_by_stop_id, periods):
                 period_headways[s_id][p_ii] = round(headway,2)
     return period_headways
 
-def writeHeadwaysMinutes(schedule, stop_visit_times, periods, csv_fname,
-        stop_id_order=None):
+def calcHeadwaysMinutes(schedule, stop_visit_times, periods):
     period_visit_counts = getPeriodCountsByStopId(stop_visit_times, periods)
     period_headways = getPeriodHeadways(period_visit_counts, periods)
-
-    csv_file = open(csv_fname, 'w')
-    writer = csv.writer(csv_file, delimiter=';')
-    period_names = []
-    for p0, p1 in periods:
-        p0t = tdToTimeOfDay(p0)
-        p1t = tdToTimeOfDay(p1)
-        pname = "%s-%s" % (p0t.strftime('%H_%M'), p1t.strftime('%H_%M'))
-        period_names.append(pname)
-
-    writer.writerow(['Stop_id','Stop_name',] + period_names)
-
-    if stop_id_order is None:
-        s_ids = period_headways.keys()
-    else:
-        s_ids = stop_id_order
-    for s_id in s_ids:
-        period_headways_at_stop = period_headways[s_id]
-        writer.writerow([s_id, schedule.stops[s_id].stop_name] \
-            + period_headways_at_stop)
-    csv_file.close()
-    return
+    return period_headways
 
 def build_nominal_stop_orders_by_dir_serv_period(trip_dict, p_keys,
         route_dir_serv_periods):
@@ -285,25 +268,147 @@ def build_stop_visit_times_by_dir_serv_period(trip_dict, p_keys,
 def routeDirStringToFileReady(route_dir):
     return route_dir.replace(' ','_').replace('(','').replace(')','')
 
-def extract_route_speed_freq_info_by_time_periods(schedule, route_name,
-        time_periods, output_path):
-    """Note: time_periods argument of the form of a list of tuples.
-    Each tuple is a pair of Python timedelta objects. First of these
-    represents "time past midnight of service day that period of interest
-    starts. Latter is time that the period of interest ends.
-    Periods need to be sequential, and shouldn't overlap."""
-    if not os.path.exists(output_path):
-        os.makedirs(output_path)
+# TODO: would be good to allow optional argument to provide a seg_geom here, in which
+# case this is used to calculate the actual distance along seg geom (rather
+# than straight-line distance along surface of the earth)??
+def calc_distance(gtfs_stop_a, gtfs_stop_b):
+    # Use the Haversine function to get an approx dist along the earth.
+    dist_m = lineargeom.haversine(gtfs_stop_a.stop_lon, gtfs_stop_a.stop_lat,
+        gtfs_stop_b.stop_lon, gtfs_stop_b.stop_lat)
+    return dist_m
 
-    r_id, r_info = getRouteByLongName(schedule, route_name)
-    trip_dict = r_info.GetPatternIdTripDict()
-    p_keys = [k for k in trip_dict.iterkeys()]
+def calc_seg_speed_km_h(seg_dist_m, seg_trav_time_s):
+    # Handle edge-case of problematic GTFS that does sometimes appear in practice :-
+    # two stops having same scheduled stop time.
+    # We don't want divide-by-zero errors to occur later when converting back
+    # to a travel time :- so set to a default speed. 
+    if seg_trav_time_s < 1e-6:
+        seg_speed_km_h = DEFAULT_FALLBACK_SEG_SPEED_KM_H
+    else:
+        seg_speed_km_h = seg_dist_m / float(seg_trav_time_s)
+    return seg_speed_km_h
 
-    print "Printing basic info for the %d trip patterns in this route." % \
-        len(trip_dict)
+def build_segment_speeds_by_dir_serv_period(trip_dict, p_keys,
+        route_dir_serv_periods):
+    all_patterns_stop_visit_times = {}
+    for dir_period_pair in route_dir_serv_periods:
+        all_patterns_stop_visit_times[dir_period_pair] = {}
 
+    # This lookup dict will be used for keeping track of distances between
+    #  needed stop pairs (segments) for this route.
+    seg_distances = {}
+    
     for p_ii, p_key in enumerate(p_keys):
-        trips = trip_dict[p_key]
+        trips = trip_dict[p_keys[p_ii]]
+        # Now add relevant info to all stop patterns list.
+        # Note:- since this includes different dir, period pairs, need
+        #  to do individually.
+        for trip in trips:
+            trip_dir = trip['trip_headsign']
+            trip_serv_period = trip['service_id']
+            all_patterns_entry = \
+                all_patterns_stop_visit_times[(trip_dir,trip_serv_period)]
+            #import pdb
+            #pdb.set_trace()
+            for stop_time_pair in pairs(trip.GetStopTimes()):
+                s_id_pair = (stop_time_pair[0].stop.stop_id,
+                    stop_time_pair[1].stop.stop_id)
+                s_arr_time_pair = (stop_time_pair[0].arrival_secs,
+                    stop_time_pair[1].arrival_secs)
+                try:
+                    seg_dist_m = seg_distances[s_id_pair]
+                except KeyError:
+                    seg_dist_m = calc_distance(stop_time_pair[0].stop,
+                        stop_time_pair[1].stop)
+                    seg_distances[s_id_pair] = seg_dist_m
+
+                seg_trav_time_s = s_arr_time_pair[1] - s_arr_time_pair[0]
+                assert seg_trav_time_s >= (0.0 - 1e-6)
+                # use a function here to handle units, special cases (e.g.
+                # where dist or time = 0)
+                seg_speed_km_h = calc_seg_speed_km_h(seg_dist_m, seg_trav_time_s)
+                assert seg_speed_km_h >= 0.0
+
+                seg_speed_tuple = (s_arr_time_pair[0], s_arr_time_pair[1], seg_speed_km_h)
+    
+                if s_id_pair not in all_patterns_entry:
+                    all_patterns_entry[s_id_pair] = [seg_speed_tuple]
+                else:
+                    all_patterns_entry[s_id_pair].append(seg_speed_tuple)
+
+    # Sort results before returning
+    for route_dir, serv_period in route_dir_serv_periods:
+            all_patterns_entry = \
+                all_patterns_stop_visit_times[(route_dir,serv_period)]
+            for stop_id_pair in all_patterns_entry.iterkeys():
+                # We want to sort these by arrival time at first stop in pair.
+                # Fortunately Python's default sort does it this way.
+                all_patterns_entry[stop_id_pair].sort()
+
+    return all_patterns_stop_visit_times
+
+def calc_avg_speeds_during_time_periods(schedule, seg_speeds_dict, time_periods):
+    """Note:- assumes and requires that the seg_speeds_dict is already in
+    sorted order."""
+    speeds_in_periods = {}
+    for s_id_pair, seg_speed_tuples in seg_speeds_dict.iteritems():
+        speeds_in_periods[s_id_pair] = [[] for ii in range(len(time_periods))]
+        curr_period_i = 0
+        p_start, p_end = time_periods[0]
+        pstart_sec = tdToSecs(p_start)
+        pend_sec = tdToSecs(p_end)
+        for pt_a_time, pt_b_time, seg_speed_km_h in seg_speed_tuples:
+            if pt_a_time >= pstart_sec and pt_a_time <= pend_sec:
+                speeds_in_periods[s_id_pair][curr_period_i].append(seg_speed_km_h)
+            else:
+                curr_period_i += 1
+                if curr_period_i >= len(time_periods):
+                    # We've gone through all periods of interest :- go 
+                    #  on to next segment.
+                    break
+                for time_period in time_periods[curr_period_i:]:
+                    p_start, p_end = time_period
+                    pstart_sec = tdToSecs(p_start)
+                    pend_sec = tdToSecs(p_end)
+                    if pt_a_time >= pstart_sec and pt_a_time <= pend_sec:
+                        speeds_in_periods[s_id_pair][curr_period_i].append(\
+                            seg_speed_km_h)
+                        break
+                    curr_period_i += 1
+
+    avg_speeds = {}
+    speed_min_maxes = {}
+    for s_id_pair in seg_speeds_dict.iterkeys():
+        avg_speeds[s_id_pair] = []
+        speed_min_maxes[s_id_pair] = []
+        for period_i in range(len(time_periods)):
+            s_in_p = speeds_in_periods[s_id_pair][period_i]
+            if len(s_in_p) == 0:
+                avg_speeds[s_id_pair].append(-1)
+                speed_min_maxes[s_id_pair].append(None)
+            else:
+                avg_speed_in_p = sum(s_in_p) / float(len(s_in_p))
+                avg_speeds[s_id_pair].append(avg_speed_in_p)
+                speed_min_maxes[s_id_pair].append(
+                    (min(s_in_p), max(s_in_p)))
+    return avg_speeds
+
+def extract_route_dir_serv_period_tuples(trip_patterns_dict):
+    # Handle these as tuples, since we want to make sure we only consider
+    #  service period, direction pairs that actually exist.
+    route_dir_serv_periods = [] 
+    for trips in trip_patterns_dict.itervalues():
+        for trip in trips:
+            trip_dir = trip['trip_headsign']
+            trip_serv_period = trip['service_id']
+            dir_period_pair = (trip_dir, trip_serv_period)
+            if dir_period_pair not in route_dir_serv_periods:
+                route_dir_serv_periods.append(dir_period_pair)
+    return route_dir_serv_periods
+
+def print_trip_start_times_for_patterns(trip_patterns_dict):   
+    for p_ii, p_key in enumerate(trip_patterns_dict.keys()):
+        trips = trip_patterns_dict[p_key]
         n_trips = len(trips)
         trips_headsign = trips[0].trip_headsign
         trip_pattern = trips[0].GetPattern()
@@ -319,18 +424,114 @@ def extract_route_speed_freq_info_by_time_periods(schedule, route_name,
             sorted_start_times]
         print "\t(Sorted) start times are %s" % \
             (' ,'.join(map(str, sorted_start_time_of_days)))
+    return
 
-    # Handle these as tuples, since we want to make sure we only consider
-    #  service period, direction pairs that actually exist.
-    route_dir_serv_periods = [] 
-    for p_key in p_keys:
-        trips = trip_dict[p_key]
-        for trip in trips:
-            trip_dir = trip['trip_headsign']
-            trip_serv_period = trip['service_id']
-            dir_period_pair = (trip_dir, trip_serv_period)
-            if dir_period_pair not in route_dir_serv_periods:
-                route_dir_serv_periods.append(dir_period_pair)
+def get_time_period_name_strings(periods):
+    period_names = []
+    for p0, p1 in periods:
+        p0t = tdToTimeOfDay(p0)
+        p1t = tdToTimeOfDay(p1)
+        pname = "%s-%s" % (p0t.strftime('%H_%M'), p1t.strftime('%H_%M'))
+        period_names.append(pname)
+    return period_names
+
+def writeHeadwaysMinutes(schedule, period_headways, periods, csv_fname,
+        stop_id_order=None):
+
+    csv_file = open(csv_fname, 'w')
+    writer = csv.writer(csv_file, delimiter=';')
+
+    period_names = get_time_period_name_strings(periods)
+    writer.writerow(['Stop_id','Stop_name',] + period_names)
+
+    if stop_id_order is None:
+        s_ids = period_headways.keys()
+    else:
+        s_ids = stop_id_order
+    for s_id in s_ids:
+        period_headways_at_stop = period_headways[s_id]
+        writer.writerow([s_id, schedule.stops[s_id].stop_name] \
+            + period_headways_at_stop)
+    csv_file.close()
+    return
+
+def writeAvgSpeedsOnSegments(schedule, period_avg_speeds, periods, csv_fname):
+    csv_file = open(csv_fname, 'w')
+    writer = csv.writer(csv_file, delimiter=';')
+
+    period_names = get_time_period_name_strings(periods)
+    writer.writerow(['Stop_a_id','Stop_a_name','Stop_b_id','Stop_b_name']\
+        + period_names)
+
+    s_id_pairs = period_avg_speeds.keys()
+    for s_id_pair in s_id_pairs:
+        avg_speeds_on_seg = period_avg_speeds[s_id_pair]
+        writer.writerow(
+            [s_id_pair[0], schedule.stops[s_id_pair[0]].stop_name, \
+            s_id_pair[1], schedule.stops[s_id_pair[1]].stop_name] \
+            + avg_speeds_on_seg)
+    csv_file.close()
+    return
+
+def extract_route_speed_info_by_time_periods(schedule, route_name,
+        time_periods, output_path):
+    """Note: See doc for function extract_route_freq_info_by_time_periods()
+    for explanation of time_periods argument format."""
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+
+    r_id, r_info = getRouteByLongName(schedule, route_name)
+    trip_dict = r_info.GetPatternIdTripDict()
+    p_keys = trip_dict.keys()
+
+    route_dir_serv_periods = extract_route_dir_serv_period_tuples(trip_dict)
+
+    all_patterns_segment_speed_infos = build_segment_speeds_by_dir_serv_period(
+        trip_dict, p_keys, route_dir_serv_periods)
+
+    route_avg_speeds_during_time_periods = {}
+    for dir_period_pair in route_dir_serv_periods:
+        route_avg_speeds_during_time_periods[dir_period_pair] = {}
+
+    for dir_period_pair in route_dir_serv_periods:
+            all_patterns_entry = \
+                all_patterns_segment_speed_infos[dir_period_pair]
+            avg_speeds = calc_avg_speeds_during_time_periods(schedule,
+                all_patterns_entry, time_periods)
+            route_avg_speeds_during_time_periods[dir_period_pair] = avg_speeds
+
+    # write to relevant files.
+    for route_dir, serv_period in route_dir_serv_periods:
+            avg_speeds = route_avg_speeds_during_time_periods[\
+                (route_dir, serv_period)]
+            fname_all = "%s-speeds-%s-%s-all.csv" % \
+                (route_name, serv_period, \
+                routeDirStringToFileReady(route_dir))
+            fpath = os.path.join(output_path, fname_all)
+            writeAvgSpeedsOnSegments(schedule, avg_speeds,
+                time_periods, fpath)
+    return
+
+def extract_route_freq_info_by_time_periods(schedule, route_name,
+        time_periods, output_path):
+    """Note: time_periods argument of the form of a list of tuples.
+    Each tuple is a pair of Python timedelta objects. First of these
+    represents "time past midnight of service day that period of interest
+    starts. Latter is time that the period of interest ends.
+    Periods need to be sequential, and shouldn't overlap."""
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+
+    r_id, r_info = getRouteByLongName(schedule, route_name)
+    trip_dict = r_info.GetPatternIdTripDict()
+    p_keys = trip_dict.keys()
+
+    print "Printing basic info for the %d trip patterns in this route." % \
+        len(trip_dict)
+
+    print_trip_start_times_for_patterns(trip_dict)
+    
+    route_dir_serv_periods = extract_route_dir_serv_period_tuples(trip_dict)
 
     for p_ii, p_key in enumerate(p_keys):
         trips = trip_dict[p_keys[p_ii]]
@@ -342,11 +543,12 @@ def extract_route_speed_freq_info_by_time_periods(schedule, route_name,
         master_stops = trips[0].GetPattern()
         master_stop_ids = [s.stop_id for s in master_stops]
         for serv_period, stop_visit_times in stop_visit_times_by_p.iteritems(): 
+            period_headways = calcHeadwaysMinutes(schedule, stop_visit_times, time_periods)
             fname = "%s-hways-p%d-%s-%s.csv" % \
                 (route_name, p_ii, routeDirStringToFileReady(trips_dir),
                     serv_period)
             fpath = os.path.join(output_path, fname)
-            writeHeadwaysMinutes(schedule, stop_visit_times, time_periods,
+            writeHeadwaysMinutes(schedule, period_headways, time_periods,
                 fpath, stop_id_order=master_stop_ids)
 
     all_patterns_nominal_orders = build_nominal_stop_orders_by_dir_serv_period(
@@ -354,18 +556,22 @@ def extract_route_speed_freq_info_by_time_periods(schedule, route_name,
     all_patterns_stop_visit_times = build_stop_visit_times_by_dir_serv_period(
         trip_dict, p_keys, route_dir_serv_periods)
 
+    # TODO: - good to create an intermediate step here where I save the
+    # headways to a Pythonic data structure, rather than direct to CSV.
     # Finally print to file relevant info.
     for route_dir, serv_period in route_dir_serv_periods:
             all_patterns_entry = \
                 all_patterns_stop_visit_times[(route_dir,serv_period)]
-            nominal_order = all_patterns_nominal_orders[\
+            period_headways = calcHeadwaysMinutes(schedule,
+                all_patterns_stop_visit_times[(route_dir, serv_period)],
+                time_periods)
+            stop_write_order = all_patterns_nominal_orders[\
                 (route_dir,serv_period)]
             fname_all = "%s-hways-%s-%s-all.csv" % \
                 (route_name, serv_period, \
                 routeDirStringToFileReady(route_dir))
             fpath = os.path.join(output_path, fname_all)
-            writeHeadwaysMinutes(schedule,
-                all_patterns_stop_visit_times[(route_dir, serv_period)],
-                time_periods, fpath, stop_id_order=nominal_order)
+            writeHeadwaysMinutes(schedule, period_headways,
+                time_periods, fpath, stop_id_order=stop_write_order)
     return
 
