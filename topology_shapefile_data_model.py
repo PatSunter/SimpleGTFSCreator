@@ -195,6 +195,9 @@ def create_stops_shp_file(stops_shp_file_name, delete_existing=False):
         else:
             print "... so exiting."
             sys.exit(1)
+    dirname = os.path.dirname(abs_stops_shp_file_name)
+    if not os.path.exists(dirname):
+        os.makedirs(dirname)
     driver = ogr.GetDriverByName("ESRI Shapefile")
     stops_shp_file = driver.CreateDataSource(abs_stops_shp_file_name)
     if stops_shp_file is None:
