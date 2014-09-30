@@ -100,8 +100,15 @@ def get_routes_and_segments(segs_lyr):
 
 def get_route_names_sorted(route_defs):
     # Get an ordered list of route names so we can write in name order,
-    # Dropping the 'R' for route.
-    rnames_sorted = sorted(route_defs.keys(), key=lambda s: int(s[1:]))
+    keyfunc = None
+    if len(route_defs.keys()[0]) <= 3:
+        # Dropping the 'R' for route, for short route names, and sort
+        #  by integer version of remaining string
+        keyfunc = lambda s: int(s[1:])
+    else:
+        # Just sort by the full route name string.
+        keyfunc = lambda s: s
+    rnames_sorted = sorted(route_defs.keys(), key=keyfunc)
     return rnames_sorted
 
 def order_route_segments(all_routes, rnames_sorted=None):
@@ -116,25 +123,27 @@ def order_route_segments(all_routes, rnames_sorted=None):
         rsegtuples = all_routes[rname]
         if len(rsegtuples) == 1:
             routes_ordered[rname] = rsegtuples
-            continue
-        seglinks = build_seg_links(rsegtuples)
-        ordered_segtuples = order_based_on_links(rsegtuples, seglinks)
-        routes_ordered[rname] = ordered_segtuples
-        # Now create the directions
-        linkstop = segs_link(ordered_segtuples[0], ordered_segtuples[1])
-        if ordered_segtuples[0][1] != linkstop:
-            startstop = ordered_segtuples[0][1]
+            startstop = rsegtuples[0][1]
+            endstop = rsegtuples[0][2]
         else:
-            startstop = ordered_segtuples[0][2]
-        linkstop = segs_link(ordered_segtuples[-2], ordered_segtuples[-1])
-        if ordered_segtuples[-1][1] != linkstop:
-            endstop = ordered_segtuples[-1][1]
-        else:
-            endstop = ordered_segtuples[-1][2]
+            seglinks = build_seg_links(rsegtuples)
+            ordered_segtuples = order_based_on_links(rsegtuples, seglinks)
+            routes_ordered[rname] = ordered_segtuples
+            # Now create the directions
+            linkstop = segs_link(ordered_segtuples[0], ordered_segtuples[1])
+            if ordered_segtuples[0][1] != linkstop:
+                startstop = ordered_segtuples[0][1]
+            else:
+                startstop = ordered_segtuples[0][2]
+            linkstop = segs_link(ordered_segtuples[-2], ordered_segtuples[-1])
+            if ordered_segtuples[-1][1] != linkstop:
+                endstop = ordered_segtuples[-1][1]
+            else:
+                endstop = ordered_segtuples[-1][2]
         dir1 = "%s->%s" % (startstop, endstop)
         dir2 = "%s->%s" % (endstop, startstop)
         route_dirs[rname] = (dir1, dir2)
-    assert len(routes_ordered) == len(all_routes)
+    assert len(routes_ordered) == len(all_routes) == len(route_dirs)
     return routes_ordered, route_dirs
 
 def process_all_routes(input_shp_fname, output_fname):
