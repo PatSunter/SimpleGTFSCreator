@@ -17,7 +17,8 @@ import transitfeed
 from misc_utils import pairs
 import lineargeom
 
-SEC_PER_DAY = 86400
+SEC_PER_HOUR = 60 * 60
+SEC_PER_DAY = SEC_PER_HOUR * 24
 
 DEFAULT_FALLBACK_SEG_SPEED_KM_H = 10.0
 
@@ -337,7 +338,8 @@ def calc_seg_speed_km_h(seg_dist_m, seg_trav_time_s):
     if seg_trav_time_s < 1e-6:
         seg_speed_km_h = DEFAULT_FALLBACK_SEG_SPEED_KM_H
     else:
-        seg_speed_km_h = seg_dist_m / float(seg_trav_time_s)
+        seg_speed_km_h = (seg_dist_m / 1000.0) / \
+            float(seg_trav_time_s / float(SEC_PER_HOUR))
     return seg_speed_km_h
 
 def build_segment_speeds_by_dir_serv_period(trip_dict, p_keys,
@@ -360,8 +362,6 @@ def build_segment_speeds_by_dir_serv_period(trip_dict, p_keys,
             trip_serv_period = trip['service_id']
             all_patterns_entry = \
                 all_patterns_stop_visit_times[(trip_dir,trip_serv_period)]
-            #import pdb
-            #pdb.set_trace()
             for stop_time_pair in pairs(trip.GetStopTimes()):
                 s_id_pair = (stop_time_pair[0].stop.stop_id,
                     stop_time_pair[1].stop.stop_id)
@@ -397,11 +397,12 @@ def build_segment_speeds_by_dir_serv_period(trip_dict, p_keys,
                 # Fortunately Python's default sort does it this way.
                 all_patterns_entry[stop_id_pair].sort()
 
-    return all_patterns_stop_visit_times
+    return all_patterns_stop_visit_times, seg_distances
 
 def calc_avg_speeds_during_time_periods(schedule, seg_speeds_dict, time_periods):
     """Note:- assumes and requires that the seg_speeds_dict is already in
     sorted order."""
+    
     speeds_in_periods = {}
     for s_id_pair, seg_speed_tuples in seg_speeds_dict.iteritems():
         speeds_in_periods[s_id_pair] = [[] for ii in range(len(time_periods))]
@@ -507,26 +508,34 @@ def writeHeadwaysMinutes(schedule, period_headways, periods, csv_fname,
     csv_file.close()
     return
 
-def writeAvgSpeedsOnSegments(schedule, period_avg_speeds, periods, csv_fname):
+def writeAvgSpeedsOnSegments(schedule, period_avg_speeds, seg_distances,
+        periods, csv_fname, round_places):
     csv_file = open(csv_fname, 'w')
     writer = csv.writer(csv_file, delimiter=';')
 
     period_names = get_time_period_name_strings(periods)
-    writer.writerow(['Stop_a_id','Stop_a_name','Stop_b_id','Stop_b_name']\
-        + period_names)
+    writer.writerow(['Stop_a_id','Stop_a_name','Stop_b_id','Stop_b_name',\
+        'seg_dist_m'] + period_names)
 
     s_id_pairs = period_avg_speeds.keys()
     for s_id_pair in s_id_pairs:
         avg_speeds_on_seg = period_avg_speeds[s_id_pair]
+        if round_places:
+            assert round_places >= 1
+            avg_speeds_on_seg_output = map(lambda x: round(x, round_places),
+                avg_speeds_on_seg)
+        else:
+            avg_speeds_on_seg_output = avg_speeds_on_seg
         writer.writerow(
             [s_id_pair[0], schedule.stops[s_id_pair[0]].stop_name, \
-            s_id_pair[1], schedule.stops[s_id_pair[1]].stop_name] \
-            + avg_speeds_on_seg)
+            s_id_pair[1], schedule.stops[s_id_pair[1]].stop_name, \
+            round(seg_distances[s_id_pair], round_places)] \
+            + avg_speeds_on_seg_output)
     csv_file.close()
     return
 
 def extract_route_speed_info_by_time_periods(schedule, route_name,
-        time_periods, output_path):
+        time_periods, output_path, round_places=2):
     """Note: See doc for function extract_route_freq_info_by_time_periods()
     for explanation of time_periods argument format."""
     if not os.path.exists(output_path):
@@ -538,8 +547,9 @@ def extract_route_speed_info_by_time_periods(schedule, route_name,
 
     route_dir_serv_periods = extract_route_dir_serv_period_tuples(trip_dict)
 
-    all_patterns_segment_speed_infos = build_segment_speeds_by_dir_serv_period(
-        trip_dict, p_keys, route_dir_serv_periods)
+    all_patterns_segment_speed_infos, seg_distances = \
+        build_segment_speeds_by_dir_serv_period( trip_dict, p_keys,
+        route_dir_serv_periods)
 
     route_avg_speeds_during_time_periods = {}
     for dir_period_pair in route_dir_serv_periods:
@@ -561,8 +571,8 @@ def extract_route_speed_info_by_time_periods(schedule, route_name,
                 (route_name_file_ready, serv_period, \
                 routeDirStringToFileReady(route_dir))
             fpath = os.path.join(output_path, fname_all)
-            writeAvgSpeedsOnSegments(schedule, avg_speeds,
-                time_periods, fpath)
+            writeAvgSpeedsOnSegments(schedule, avg_speeds, seg_distances,
+                time_periods, fpath, round_places)
     return
 
 def extract_route_freq_info_by_time_periods(schedule, route_name,
