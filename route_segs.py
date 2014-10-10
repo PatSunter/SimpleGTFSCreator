@@ -259,6 +259,33 @@ def order_all_route_segments(all_routes, rnames_sorted=None):
     assert len(routes_ordered) == len(all_routes) == len(route_dirs)
     return routes_ordered, route_dirs
 
+def extract_stop_list_along_route(seg_refs):
+    stop_ids = []
+    for seg_ctr, seg_ref in enumerate(seg_refs):
+        if seg_ctr == 0:
+            # special case for a route with only one segment.
+            if len(seg_refs) == 1:
+                if dir_id == 0:
+                    first_stop_id = seg_ref.first_id
+                    second_stop_id = seg_ref.second_id
+                else:    
+                    first_stop_id = seg_ref.second_id
+                    second_stop_id = seg_ref.first_id
+            else:        
+                next_seg_ref = seg_refs[seg_ctr+1]
+                first_stop_id, second_stop_id = get_stop_order(seg_ref,
+                    next_seg_ref)
+        else:
+            first_stop_id = prev_second_stop_id
+            second_stop_id = get_other_stop_id(seg_ref, first_stop_id)
+
+        stop_ids.append(first_stop_id)
+        # Save this to help with calculations in subsequent steps
+        prev_second_stop_id = second_stop_id
+    # Finally, add second stop of final segment.
+    stop_ids.append(second_stop_id)
+    return stop_ids
+
 ########################################
 # I/O from segments and stops shapefiles
 

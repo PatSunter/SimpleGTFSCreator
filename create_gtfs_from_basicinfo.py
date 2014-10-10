@@ -289,14 +289,18 @@ def _get_gtfs_stop_byname(stop_name, schedule):
         sys.exit(1)
     return stop 
 
-def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_shp,
-        stops_shp, mode_config, schedule, use_seg_speeds,
+def build_stop_list_and_seg_info_along_route(route_def, dir_id,
+        route_segments_shp, stops_shp, mode_config, schedule, use_seg_speeds,
         stop_id_to_gtfs_stop_id_map):
 
     prebuilt_stop_info_list = []
+
+    if len(route_def.ordered_seg_ids) == 0:
+        print "Warning: for route name '%s', no route segments defined." \
+            % route_def.name
+        return []
     route_segments_lyr = route_segments_shp.GetLayer(0)
     stops_lyr = stops_shp.GetLayer(0)
-
     # Apply a filter to speed up calculations - only segments on this route.
     where_clause = "%s LIKE '%%%s' OR %s LIKE '%%%s,%%'" % \
         (tp_model.SEG_ROUTE_LIST_FIELD, route_def.name,\
@@ -304,16 +308,9 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
     route_segments_lyr.SetAttributeFilter(where_clause)
     segs_lookup_table = tp_model.build_segs_lookup_table(route_segments_lyr)
 
-    if len(route_def.ordered_seg_ids) == 0:
-        print "Warning: for route name '%s', no route segments defined." \
-            % route_def.name
-        return []
-
     ordered_seg_refs = route_segs.create_ordered_seg_refs_from_ids(
         route_def.ordered_seg_ids, segs_lookup_table)
-
-    # If direction ID is 1 - generally "away from city" - 
-    # create an list in reverse stop id order.
+    # If direction ID is 1 - create a list in reverse stop id order.
     # N.B. :- created this temporary list (not just iterator) since we now need
     # to look ahead to check for 'matching' stops in segments.
     if dir_id == 0:
@@ -321,29 +318,12 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
     else:
         seg_refs = list(reversed(ordered_seg_refs))
 
-    stop_seq = 0
-    for seg_ctr, seg_ref in enumerate(seg_refs):
-        if seg_ctr == 0:
-            # special case for a route with only one segment.
-            if len(seg_refs) == 1:
-                if dir_id == 0:
-                    first_stop_id = seg_ref.first_id
-                    second_stop_id = seg_ref.second_id
-                else:    
-                    first_stop_id = seg_ref.second_id
-                    second_stop_id = seg_ref.first_id
-            else:        
-                next_seg_ref = seg_refs[seg_ctr+1]
-                first_stop_id, second_stop_id = route_segs.get_stop_order(seg_ref,
-                    next_seg_ref)
-        else:
-            first_stop_id = prev_second_stop_id
-            second_stop_id = route_segs.get_other_stop_id(seg_ref,
-                first_stop_id)
+    stop_ids_along_route = route_segs.extract_stop_list_along_route(seg_refs)
 
+    for seg_ctr, seg_ref in enumerate(seg_refs):
+        first_stop_id = stop_ids_along_route[seg_ctr]
         first_stop_id_gtfs = stop_id_to_gtfs_stop_id_map[first_stop_id]
         first_stop = schedule.GetStop(first_stop_id_gtfs)
-
         s_info = Seq_Stop_Info(first_stop)
         # We are still going to save key info now, to save accessing the
         # shapefile layers again unnecessarily later.
@@ -356,18 +336,14 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id, route_segments_s
         save_seq_stop_speed_info(s_info, seg_feature, stops_lyr, use_seg_speeds)
         prebuilt_stop_info_list.append(s_info)
 
-        stop_seq += 1
-        # Save this to help with calculations in subsequent steps
-        prev_second_stop_id = second_stop_id
-
-    # Now we've exited from the loop :- we need to now add a final stop for
-    # the second stop in the final segment in the direction we're travelling.
-    # second_stop_id should be set correctly from last run thru above loop.
-    final_stop_id_gtfs = stop_id_to_gtfs_stop_id_map[second_stop_id]
+    # Now we've exited from the loop :- we need to now add info for
+    #  final stop of the last segment.
+    final_stop_id_gtfs = stop_id_to_gtfs_stop_id_map[stop_ids_along_route[-1]]
     final_stop = schedule.GetStop(final_stop_id_gtfs)
     s_info_final = Seq_Stop_Info(final_stop)
     # Final stop doesn't have speed etc on segment, so leave as zero.
     prebuilt_stop_info_list.append(s_info_final)
+
     for segment in segs_lookup_table.itervalues():
         # tidy up memory.
         segment.Destroy()
