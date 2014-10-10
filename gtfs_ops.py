@@ -17,8 +17,8 @@ import transitfeed
 from misc_utils import pairs
 import lineargeom
 
-SEC_PER_HOUR = 60 * 60
-SEC_PER_DAY = SEC_PER_HOUR * 24
+SECS_PER_HOUR = 60 * 60
+SECS_PER_DAY = SECS_PER_HOUR * 24
 
 DEFAULT_FALLBACK_SEG_SPEED_KM_H = 10.0
 
@@ -39,9 +39,11 @@ def tdToSecs(td):
     """Convert a Python timedelta object to an amount of seconds, as a double.
     (Useful for back-converting timedeltas into the straight seconds form
     needed by the transitfeed library."""
-    secs = td.days * SEC_PER_DAY + td.seconds + td.microseconds / float(1e6)
+    secs = td.days * SECS_PER_DAY + td.seconds + td.microseconds / float(1e6)
     return secs
 
+def tdToHours(td):
+    return tdToSecs(td) / SECS_PER_HOUR
 # Utility printing functions
 
 def printAllStopNamesInTrip(trip):    
@@ -339,7 +341,7 @@ def calc_seg_speed_km_h(seg_dist_m, seg_trav_time_s):
         seg_speed_km_h = DEFAULT_FALLBACK_SEG_SPEED_KM_H
     else:
         seg_speed_km_h = (seg_dist_m / 1000.0) / \
-            float(seg_trav_time_s / float(SEC_PER_HOUR))
+            float(seg_trav_time_s / float(SECS_PER_HOUR))
     return seg_speed_km_h
 
 def get_update_seg_dist_m(seg_distances, stop_time_pair):
