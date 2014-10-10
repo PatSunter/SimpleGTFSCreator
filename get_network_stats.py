@@ -11,8 +11,9 @@ import math
 from datetime import timedelta, time
 
 import topology_shapefile_data_model as tp_model
-import create_route_defs_csv as route_defs
 import mode_timetable_info as m_t_info
+import route_segs
+import gtfs_ops
 
 # Length calculations:-
 
@@ -25,34 +26,40 @@ import mode_timetable_info as m_t_info
 
 MORNING_PEAK = time(8,00)
 
-def get_route_length(route_def, segs_lookup_dict):
+def get_route_length(segs_in_route):
     rlength = 0
-    for segtuple in route_def:
-        seg_id = segtuple[0]
-        seg_feat = segs_lookup_dict[seg_id]
-        dist_km = tp_model.get_distance_km(seg_feat)
-        rlength += dist_km
+    for seg_ref in segs_in_route:
+        rlength += route_segs.get_seg_dist_km(seg_ref)
     return rlength
 
-def get_route_shared_sections_bus(route_def, segs_lookup_dict):
+def get_route_shared_sections_bus(segs_in_route, curr_route_name):
     shared_len = 0
     shared_lens_by_route = {}
-    for segtuple in route_def:
-        seg_id = segtuple[0]
-        seg_feat = segs_lookup_dict[seg_id]
-        seg_rlist = tp_model.get_routes_on_seg(seg_feat)
-        if len(seg_rlist) > 1:
-            dist_km = tp_model.get_distance_km(seg_feat)
-            shared_len += dist_km
+    for seg_ref in segs_in_route:
+        if len(seg_ref.routes) > 1:
+            seg_route_dist_km = route_segs.get_seg_dist_km(seg_ref)
+            shared_len += seg_route_dist_km
+            for rname in seg_ref.routes:
+                if rname == curr_route_name:
+                    continue
+                if rname not in shared_lens_by_route:
+                    shared_lens_by_route[rname] = seg_route_dist_km     
+                else:
+                    shared_lens_by_route[rname] += seg_route_dist_km
     return shared_len, shared_lens_by_route
 
-def calc_time_on_route_peak(route_def, segs_lookup_dict):
+def calc_time_on_route_peak(segs_in_route, segs_lookup_dict):
     rtime = timedelta(0)
-    for segtuple in route_def:
-        seg_id = segtuple[0]
+    for seg_ref in segs_in_route:
+        seg_id = seg_ref.seg_id
+        seg_route_dist_km = route_segs.get_seg_dist_km(seg_ref)
         seg_feat = segs_lookup_dict[seg_id]
-        dist_km = tp_model.get_distance_km(seg_feat)
-        seg_hrs = dist_km / seg_feat.GetField(tp_model.SEG_PEAK_SPEED_FIELD)
+        seg_peak_speed_km_h = seg_feat.GetField(tp_model.SEG_PEAK_SPEED_FIELD)
+        if seg_peak_speed_km_h <= 0:
+            print "Error in calc time on segment id %d - bad speed value of "\
+                "%f km/h encountered." % (seg_id, seg_peak_speed_km_h)
+            sys.exit(1)
+        seg_hrs = seg_route_dist_km / seg_peak_speed_km_h
         rtime += timedelta(hours=seg_hrs)
     return rtime
 
@@ -85,52 +92,66 @@ def calc_buses_needed_for_route_with_recovery_time(
 calc_buses_needed_for_route = calc_buses_needed_for_route_with_recovery_time
 #calc_buses_needed_for_route = calc_buses_needed_for_route_conservative_bidir
 
-def get_all_route_infos(segs_lyr, mode_config):
-    segs_lookup_dict = tp_model.build_segs_lookup_table(segs_lyr)
-    all_routes = route_defs.get_routes_and_segments(segs_lyr)
-    rnames_sorted = route_defs.get_route_names_sorted(all_routes)
-    routes_ordered, route_dirs = route_defs.order_route_segments(all_routes,
-        rnames_sorted)
+def format_timedelta_nicely(time_d):
+    total_secs = gtfs_ops.tdToSecs(time_d)
+    hours, rem_secs = divmod(total_secs, gtfs_ops.SECS_PER_HOUR)
+    mins, secs = divmod(rem_secs, 60)
+    return "%d:%02d:%04.1f" % (hours, mins, secs)
 
+def get_all_route_infos(segs_lyr, mode_config):
+    seg_refs_by_routes = route_segs.get_routes_and_segments(segs_lyr)
+    rnames_sorted = route_segs.get_route_names_sorted(
+        seg_refs_by_routes.keys())
+    routes_ordered, route_dirs = route_segs.order_all_route_segments(
+        seg_refs_by_routes, rnames_sorted)
+
+    segs_lookup_dict = tp_model.build_segs_lookup_table(segs_lyr)
     route_lengths = {}
     route_shared_section_lengths = {}
     route_shared_section_lengths_by_route = {}
     for rname in rnames_sorted:
-        route_def = routes_ordered[rname]
-        route_lengths[rname] = get_route_length(route_def, segs_lookup_dict)
+        segs_in_route = routes_ordered[rname]
+        route_lengths[rname] = get_route_length(segs_in_route)
         shared_len, shared_lens_by_route = get_route_shared_sections_bus(
-            route_def, segs_lookup_dict)
+            segs_in_route, rname)
         route_shared_section_lengths[rname] = shared_len
         route_shared_section_lengths_by_route[rname] = shared_lens_by_route
         # TODO:- get_route_shared_sections_tram()
 
     print "Route lengths for %d routes:" % len(rnames_sorted)
     for rname in rnames_sorted:
-        print "%s: %.2fkm" % (rname, route_lengths[rname])
+        print "%s: %05.2fkm" % (rname, route_lengths[rname])
     tot_dist = sum(route_lengths.values())
-    print "\nTotal route dist: %.2fkm (%.2fkm if bi-directional)" \
+    print "\nTotal route dist: %05.2fkm (%05.2fkm if bi-directional)" \
         % (tot_dist, tot_dist * 2)
     tot_multi_route = sum(route_shared_section_lengths.values())
     tot_single_route = tot_dist - tot_multi_route
-    print "Of this dist, %.2fkm is single-route, %.2fkm is multi-route." \
+    print "Of this dist, %05.2fkm is single-route, %05.2fkm is multi-route.\n" \
         % (tot_single_route, tot_multi_route)
 
     route_trav_times = {}
-    buses_needed = {}
+    route_avg_speeds = {}
+    route_buses_needed = {}
     for rname in rnames_sorted:
-        route_def = routes_ordered[rname]
-        route_trav_time = calc_time_on_route_peak(route_def,
+        segs_in_route = routes_ordered[rname]
+        route_trav_time = calc_time_on_route_peak(segs_in_route,
             segs_lookup_dict)
         route_trav_times[rname] = route_trav_time
-        buses_needed[rname] = calc_buses_needed_for_route(route_trav_time,
+        route_avg_speeds[rname] = route_lengths[rname] \
+            / gtfs_ops.tdToHours(route_trav_time)
+        route_buses_needed[rname] = calc_buses_needed_for_route(route_trav_time,
             mode_config)
 
-    print "Route trav times in peak and est. buses needed:" 
+    print "Route dists, trav times in peak, avg speed (km/h), and min. "\
+        "buses needed:" 
     for rname in rnames_sorted:
-        print "%s: %s, %d" % (rname, route_trav_times[rname],
-            buses_needed[rname])
+        print "%s: %05.2fkm, time %s, avespeed %.2f, buses %d" % (rname,
+            route_lengths[rname],
+            format_timedelta_nicely(route_trav_times[rname]),
+            route_avg_speeds[rname],
+            route_buses_needed[rname])
     print "\nTotal estimated buses needed in peak for the %d routes: %d" \
-        % (len(rnames_sorted), sum(buses_needed.values()))
+        % (len(rnames_sorted), sum(route_buses_needed.values()))
 
 def main():
     allowedServs = ', '.join(sorted(["'%s'" % key for key in \
@@ -149,7 +170,7 @@ def main():
 
     if options.segments is None:
         parser.print_help()
-        parser.error("No input shape file path containing route infos given.")
+        parser.error("seg_refs_by_routes input shape file path containing route infos given.")
     if options.service is None:
         parser.print_help()
         parser.error("No service option requested. Should be one of %s" \
