@@ -342,8 +342,90 @@ def calc_seg_speed_km_h(seg_dist_m, seg_trav_time_s):
             float(seg_trav_time_s / float(SEC_PER_HOUR))
     return seg_speed_km_h
 
+def get_update_seg_dist_m(seg_distances, stop_time_pair):
+    s_id_pair = (stop_time_pair[0].stop.stop_id,
+        stop_time_pair[1].stop.stop_id)
+    try:
+        seg_dist_m = seg_distances[s_id_pair]
+    except KeyError:
+        seg_dist_m = calc_distance(stop_time_pair[0].stop,
+            stop_time_pair[1].stop)
+        seg_distances[s_id_pair] = seg_dist_m
+    return seg_dist_m
+
+def calc_speed_on_segment_with_nearby_segs(trip_stop_pairs, stop_time_pair,
+        stop_pair_i, seg_distances, min_dist_for_speed_calc_m,
+        min_time_for_speed_calc_s):
+    s_id_pair = (stop_time_pair[0].stop.stop_id,
+        stop_time_pair[1].stop.stop_id)
+    s_arr_time_pair = (stop_time_pair[0].arrival_secs,
+        stop_time_pair[1].arrival_secs)
+    seg_dist_m = get_update_seg_dist_m(seg_distances, stop_time_pair)
+    seg_trav_time_s = s_arr_time_pair[1] - s_arr_time_pair[0]
+    assert seg_trav_time_s >= (0.0 - 1e-6)
+
+    print "In speed smoothing func:- initial seg is %d, dist %.1fm,"\
+        " time %.1f sec." % (stop_pair_i, seg_dist_m, seg_trav_time_s)
+
+    # Now, we have to keep adding segment speeds and times, till we reach
+    #  the min dist to calculate speed over.
+    speed_calc_total_dist_m = seg_dist_m
+    speed_calc_total_time_s = seg_trav_time_s
+    init_seg_i = stop_pair_i
+    move_magnitude = 1
+    go_forward_next = True
+    prev_at_trip_start = False
+    next_at_trip_end = False
+
+    while (speed_calc_total_dist_m < min_dist_for_speed_calc_m \
+            or speed_calc_total_time_s < min_time_for_speed_calc_s) \
+            and not (prev_at_trip_start and next_at_trip_end):
+        if go_forward_next:
+            seg_i_to_add = init_seg_i + move_magnitude
+            if seg_i_to_add >= len(trip_stop_pairs):
+                next_at_trip_end = True
+                go_forward_next = False
+                continue
+        else:
+            seg_i_to_add = init_seg_i - move_magnitude
+            if seg_i_to_add < 0:
+                prev_at_trip_start = True
+                go_forward_next = True
+                move_magnitude += 1
+                continue
+
+        print "...adding time and dist for seg %d..." % seg_i_to_add
+        seg_to_add = trip_stop_pairs[seg_i_to_add]
+        new_s_id_pair = (seg_to_add[0].stop.stop_id, seg_to_add[1].stop.stop_id)
+
+        new_seg_dist_m = get_update_seg_dist_m(seg_distances, seg_to_add)
+        assert new_seg_dist_m >= (0.0 - 1e-6)
+        speed_calc_total_dist_m += new_seg_dist_m
+
+        new_seg_trav_time_s = seg_to_add[1].arrival_secs - \
+            seg_to_add[0].arrival_secs 
+        assert new_seg_trav_time_s >= (0.0 - 1e-6)
+        speed_calc_total_time_s += new_seg_trav_time_s 
+
+        # This handles the 'moving window' of adding segments to total,
+        #  alternating between forwards and backwards.
+        go_forward_next = not go_forward_next
+        if go_forward_next:
+            move_magnitude += 1
+        
+    print "...for speed calc, total dist is %.1f m, total time %.1f s" % \
+        (speed_calc_total_dist_m, speed_calc_total_time_s)
+    # use a function here to handle units, special cases (e.g.
+    # where dist or time = 0)
+    smoothed_seg_speed_km_h = calc_seg_speed_km_h(speed_calc_total_dist_m,
+        speed_calc_total_time_s)
+    print "...thus speed calculated as %.2f km/h" % \
+        (smoothed_seg_speed_km_h)
+    return smoothed_seg_speed_km_h
+
 def build_segment_speeds_by_dir_serv_period(trip_dict, p_keys,
-        route_dir_serv_periods):
+        route_dir_serv_periods, min_dist_for_speed_calc_m,
+        min_time_for_speed_calc_s):
     all_patterns_stop_visit_times = {}
     for dir_period_pair in route_dir_serv_periods:
         all_patterns_stop_visit_times[dir_period_pair] = {}
@@ -362,26 +444,28 @@ def build_segment_speeds_by_dir_serv_period(trip_dict, p_keys,
             trip_serv_period = trip['service_id']
             all_patterns_entry = \
                 all_patterns_stop_visit_times[(trip_dir,trip_serv_period)]
-            for stop_time_pair in pairs(trip.GetStopTimes()):
+            trip_stop_time_pairs = list(pairs(trip.GetStopTimes()))
+            for seg_i, stop_time_pair in enumerate(trip_stop_time_pairs):
                 s_id_pair = (stop_time_pair[0].stop.stop_id,
                     stop_time_pair[1].stop.stop_id)
                 s_arr_time_pair = (stop_time_pair[0].arrival_secs,
                     stop_time_pair[1].arrival_secs)
-                try:
-                    seg_dist_m = seg_distances[s_id_pair]
-                except KeyError:
-                    seg_dist_m = calc_distance(stop_time_pair[0].stop,
-                        stop_time_pair[1].stop)
-                    seg_distances[s_id_pair] = seg_dist_m
+                seg_dist_m = get_update_seg_dist_m(seg_distances,
+                    stop_time_pair)
 
-                seg_trav_time_s = s_arr_time_pair[1] - s_arr_time_pair[0]
-                assert seg_trav_time_s >= (0.0 - 1e-6)
-                # use a function here to handle units, special cases (e.g.
-                # where dist or time = 0)
-                seg_speed_km_h = calc_seg_speed_km_h(seg_dist_m, seg_trav_time_s)
+                # We need to calculate a 'smoothed' travel time and thus
+                # speed, over several segments :- since for many GTFS feeds,
+                # stop times are rounded to the minute.
+                #import pdb
+                #pdb.set_trace()
+                seg_speed_km_h = calc_speed_on_segment_with_nearby_segs(
+                    trip_stop_time_pairs, stop_time_pair, seg_i,
+                    seg_distances, min_dist_for_speed_calc_m, 
+                    min_time_for_speed_calc_s)
+
                 assert seg_speed_km_h >= 0.0
-
-                seg_speed_tuple = (s_arr_time_pair[0], s_arr_time_pair[1], seg_speed_km_h)
+                seg_speed_tuple = (s_arr_time_pair[0], s_arr_time_pair[1],
+                    seg_speed_km_h)
     
                 if s_id_pair not in all_patterns_entry:
                     all_patterns_entry[s_id_pair] = [seg_speed_tuple]
@@ -535,7 +619,9 @@ def writeAvgSpeedsOnSegments(schedule, period_avg_speeds, seg_distances,
     return
 
 def extract_route_speed_info_by_time_periods(schedule, route_name,
-        time_periods, output_path, round_places=2):
+        time_periods, output_path, round_places=2,
+        min_dist_for_speed_calc_m=0,
+        min_time_for_speed_calc_s=60):
     """Note: See doc for function extract_route_freq_info_by_time_periods()
     for explanation of time_periods argument format."""
     if not os.path.exists(output_path):
@@ -548,8 +634,9 @@ def extract_route_speed_info_by_time_periods(schedule, route_name,
     route_dir_serv_periods = extract_route_dir_serv_period_tuples(trip_dict)
 
     all_patterns_segment_speed_infos, seg_distances = \
-        build_segment_speeds_by_dir_serv_period( trip_dict, p_keys,
-        route_dir_serv_periods)
+        build_segment_speeds_by_dir_serv_period(trip_dict, p_keys,
+        route_dir_serv_periods, min_dist_for_speed_calc_m,
+        min_time_for_speed_calc_s)
 
     route_avg_speeds_during_time_periods = {}
     for dir_period_pair in route_dir_serv_periods:
