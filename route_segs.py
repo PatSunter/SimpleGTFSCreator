@@ -28,8 +28,15 @@ def get_route_names_sorted(route_names):
     return rnames_sorted
 
 ########
-# Definition of seg_reference class and basic manipulation of them.
+# Definition of Route_Def and Seg_Reference lightweight classes and basic 
+# manipulation of them.
 
+class Route_Def:
+    def __init__(self, name, dir_names, ordered_seg_ids):
+        self.name = name
+        self.dir_names = dir_names
+        self.ordered_seg_ids = ordered_seg_ids
+  
 class Seg_Reference:
     """A small lightweight class for using as an in-memory storage of key segment
     topology information, and reference to actual segment feature in a 
@@ -51,15 +58,6 @@ class Seg_Reference:
 def add_route_to_seg_ref(seg_ref, route_name):
     seg_ref.routes.append(route_name)
 
-def segs_linked(seg1, seg2):
-    """Checks if two segments are linked by a common stop. If true, returns
-    the ID of the linking stop. If they don't link, returns None."""
-    if seg1.first_id == seg2.first_id or seg1.first_id == seg2.second_id:
-        return seg1.first_id
-    elif seg1.second_id == seg2.first_id or seg1.second_id == seg2.second_id:
-        return seg1.second_id
-    return None
-
 def seg_has_stops(seg_ref, stop_id_1, stop_id_2):
     if seg_ref.first_id == stop_id_1 and \
             seg_ref.second_id == stop_id_2 \
@@ -77,8 +75,15 @@ def get_seg_dist_km(seg_ref):
             "seg_ref." % seg_ref.seg_id
         return None
 
+def get_other_stop_id(seg_ref, stop_id):
+    if stop_id == seg_ref.first_id:
+        return seg_ref.second_id
+    else:
+        assert stop_id == seg_ref.second_id
+        return seg_ref.first_id
+
 #####################
-# Basic manipulations on a list of seg_refs
+# Basic manipulations on a list of seg_refs or route_defs
 
 def get_seg_ref_with_id(seg_id, seg_refs):
     for seg_ref in seg_refs:
@@ -126,6 +131,35 @@ def add_update_seg_ref(start_stop_id, end_stop_id, route_name,
 
 #########
 ### Functions to do with querying network topology
+
+def segs_linked(seg1, seg2):
+    """Checks if two segments are linked by a common stop. If true, returns
+    the ID of the linking stop. If they don't link, returns None."""
+    if seg1.first_id == seg2.first_id or seg1.first_id == seg2.second_id:
+        return seg1.first_id
+    elif seg1.second_id == seg2.first_id or seg1.second_id == seg2.second_id:
+        return seg1.second_id
+    return None
+
+def get_stop_order(seg_ref, next_seg_ref):
+    """Use the fact that for two segments, in the first segment, there must be
+    a matching stop with the 2nd segment. Return the IDs of the 1st and 2nd 
+    stops in the first segment."""
+    
+    linking_stop_id = segs_linked(seg_ref, next_seg_ref)
+    if linking_stop_id is None:
+        print "Error, in segment with id %d, next seg id is %d, "\
+            "stop a is #%d, stop b is #%d, "\
+            "next seg stop a is #%d, stop b is #%d, "\
+            "couldn't work out stop order."\
+            % (seg_ref.seg_id, next_seg_ref.seg_id, \
+             seg_ref.first_id, seg_ref.second_id, \
+             next_seg_ref.first_id, next_seg_ref.second_id)
+        sys.exit(1)
+    else:
+        first_stop_id = get_other_stop_id(seg_ref, linking_stop_id)
+        second_stop_id = linking_stop_id
+    return first_stop_id, second_stop_id
 
 def build_seg_links(route_seg_refs):
     """Create a dictionary, which for each segment ID, gives the list 
@@ -225,21 +259,23 @@ def order_all_route_segments(all_routes, rnames_sorted=None):
     assert len(routes_ordered) == len(all_routes) == len(route_dirs)
     return routes_ordered, route_dirs
 
-
 ########################################
 # I/O from segments and stops shapefiles
+
+def seg_ref_from_feature(seg_feature):
+    seg_id = int(seg_feature.GetField(tp_model.SEG_ID_FIELD))
+    stop_id_a, stop_id_b = tp_model.get_stop_ids_of_seg(seg_feature)
+    route_dist_on_seg = float(seg_feature.GetField(tp_model.SEG_ROUTE_DIST_FIELD))
+    seg_rlist = tp_model.get_routes_on_seg(seg_feature)
+    seg_ref = Seg_Reference(seg_id, stop_id_a, stop_id_b, 
+        route_dist_on_seg=route_dist_on_seg, routes=seg_rlist)
+    return seg_ref
 
 def get_routes_and_segments(segs_lyr):
     all_routes = {}
     for feature in segs_lyr:
-        seg_id = int(feature.GetField(tp_model.SEG_ID_FIELD))
-        pt_a = feature.GetField(tp_model.SEG_STOP_1_NAME_FIELD)
-        pt_b = feature.GetField(tp_model.SEG_STOP_2_NAME_FIELD)
-        route_dist_on_seg = float(feature.GetField(tp_model.SEG_ROUTE_DIST_FIELD))
-        seg_rlist = tp_model.get_routes_on_seg(feature)
-        seg_ref = Seg_Reference(seg_id, pt_a, pt_b, 
-            route_dist_on_seg=route_dist_on_seg, routes=seg_rlist)
-        for route in seg_rlist:
+        seg_ref = seg_ref_from_feature(feature)
+        for route in seg_ref.routes:
             if route not in all_routes:
                 all_routes[route] = [seg_ref]
             else:
@@ -249,12 +285,19 @@ def get_routes_and_segments(segs_lyr):
     segs_lyr.ResetReading()
     return all_routes
 
+def create_ordered_seg_refs_from_ids(ordered_seg_ids, segs_lookup_table):
+    ordered_seg_refs = []
+    for seg_id in ordered_seg_ids:
+        seg_feature = segs_lookup_table[seg_id]
+        seg_ref = seg_ref_from_feature(seg_feature)
+        ordered_seg_refs.append(seg_ref)
+    return ordered_seg_refs
 
 ###############################
 # I/O from route definition CSV
 
-def get_route_num(routeDictEntry):
-    rname = routeDictEntry['name']
+def get_route_num(route_def):
+    rname = route_def.name
     # Courtesy http://stackoverflow.com/questions/4289331/python-extract-numbers-from-a-string
     return int(re.findall(r'\d+', rname)[0])
 
@@ -274,32 +317,27 @@ def read_route_defs(csv_file_name, do_sort=True):
     # skip headings
     reader.next()
     for ii, row in enumerate(reader):
-        route_def = {}
-        route_def['name'] = row[0]
+        rname = row[0]
         dir1 = row[1]
         dir2 = row[2]
-        route_def['directions'] = (dir1, dir2)
         segments_str = row[3].split(',')
-        route_def['segments'] = [int(segstr) for segstr in segments_str]
+        seg_ids = [int(segstr) for segstr in segments_str]
+        route_def = Route_Def(rname, (dir1, dir2), seg_ids)
         route_defs.append(route_def)
     if do_sort == True:
         route_defs.sort(key=get_route_num)        
-
     csv_file.close()
     return route_defs
 
-def write_route_defs(csv_file_name, rnames, route_dirs, route_segs_ordered):
-        # Now write out to file.
+def write_route_defs(csv_file_name, route_defs):
     routesfile = open(csv_file_name, 'w')
     rwriter = csv.writer(routesfile, delimiter=';')
-    rwriter.writerow(['Route','dir1','dir2','Segments'])
+    rwriter.writerow(['Route', 'dir1', 'dir2', 'Segments'])
 
-    for rname in rnames:
-        dirs = route_dirs[rname]
-        rsegs = route_segs_ordered[rname]
-        seg_strs = map(lambda x: str(x.seg_id), rsegs)
-        seg_str_all = ','.join(seg_strs)
-        rwriter.writerow([rname,dirs[0],dirs[1],seg_str_all])
+    for rdef in route_defs:
+        dirs = rdef.dir_names
+        seg_str_all = ','.join(map(str, rdef.ordered_seg_ids))
+        rwriter.writerow([rdef.name, dirs[0], dirs[1], seg_str_all])
 
     routesfile.close()
     print "Wrote output to %s" % (csv_file_name)

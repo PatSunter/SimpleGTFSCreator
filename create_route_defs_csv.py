@@ -2,9 +2,11 @@
 
 import os
 from optparse import OptionParser
+import sys
+import operator
+
 import osgeo.ogr
 from osgeo import ogr
-import sys
 
 import route_segs
 
@@ -25,8 +27,14 @@ def process_all_routes_from_segments(segments_shp_fname, output_fname):
     rnames_sorted = route_segs.get_route_names_sorted(all_segs_by_route.keys())
     route_segs_ordered, route_dirs = route_segs.order_all_route_segments(
         all_segs_by_route, rnames_sorted)
-    route_segs.write_route_defs(output_fname, rnames_sorted, route_dirs,
-        route_segs_ordered)
+
+    route_defs = []
+    for rname in rnames_sorted:
+        rdef = route_segs.Route_Def(rname, route_dirs[rname],
+            map(operator.attrgetter('seg_id'), route_segs_ordered[rname]))
+        route_defs.append(rdef)
+
+    route_segs.write_route_defs(output_fname, route_defs)
 
     shapefile.Destroy()
     return
