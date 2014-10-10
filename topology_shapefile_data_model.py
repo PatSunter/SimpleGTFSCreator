@@ -3,6 +3,7 @@
 
 import os, os.path
 import sys
+import re
 
 import osgeo.ogr
 from osgeo import ogr, osr
@@ -172,13 +173,6 @@ def get_route_segment(segment_id, route_segments_lyr):
     route_segments_lyr.ResetReading()        
     return match_feature
 
-def get_other_stop_name(seg_feat, stop_name):
-    stop_name_a = seg_feat.GetField(SEG_STOP_1_NAME_FIELD)
-    if stop_name == stop_name_a:
-        return seg_feat.GetField(SEG_STOP_2_NAME_FIELD)
-    else:
-        return stop_name_a
-
 ################
 # Section below related to adding stops, routes, segments to shapefiles.
 
@@ -302,6 +296,17 @@ def add_route_to_seg(segments_lyr, seg_feat, route_name):
     segments_lyr.SetFeature(seg_feat)
     return
 
+def stop_name_from_id(stop_id, mode_config):
+    return "%s%d" % (mode_config['stop_prefix'], stop_id)
+
+def get_stop_ids_of_seg(seg_feature):
+    pt_a_name = seg_feature.GetField(SEG_STOP_1_NAME_FIELD)
+    pt_b_name = seg_feature.GetField(SEG_STOP_2_NAME_FIELD)
+    # Courtesy http://stackoverflow.com/questions/4289331/python-extract-numbers-from-a-string
+    pt_a_id = int(re.findall(r'\d+', pt_a_name)[0])
+    pt_b_id = int(re.findall(r'\d+', pt_b_name)[0])
+    return pt_a_id, pt_b_id
+
 def add_seg_ref_as_feature(segs_lyr, seg_ref, seg_geom, mode_config):
     seg_ii = segs_lyr.GetFeatureCount()
     #Create seg feature, with needed fields etc.
@@ -309,7 +314,6 @@ def add_seg_ref_as_feature(segs_lyr, seg_ref, seg_geom, mode_config):
     #Need to re-project geometry into target SRS (do this now,
     # after we've added to multipoint, which should be in same SRS as
     # above).
-    prefix = mode_config['stop_prefix']
     assert(seg_geom.GetPointCount() == 2)
     src_srs = seg_geom.GetSpatialReference()
     target_srs = segs_lyr.GetSpatialRef()
@@ -321,8 +325,10 @@ def add_seg_ref_as_feature(segs_lyr, seg_ref, seg_geom, mode_config):
     seg_feat.SetGeometry(seg_geom2)
     seg_feat.SetField(SEG_ID_FIELD, seg_ref.seg_id)
     seg_feat.SetField(SEG_ROUTE_LIST_FIELD, ",".join(seg_ref.routes))
-    seg_feat.SetField(SEG_STOP_1_NAME_FIELD, "%s%d" % (prefix, seg_ref.first_id))
-    seg_feat.SetField(SEG_STOP_2_NAME_FIELD, "%s%d" % (prefix, seg_ref.second_id))
+    seg_feat.SetField(SEG_STOP_1_NAME_FIELD,
+        stop_name_from_id(seg_ref.first_id, mode_config))
+    seg_feat.SetField(SEG_STOP_2_NAME_FIELD,
+        stop_name_from_id(seg_ref.second_id, mode_config))
     # Rounding to nearest meter below per convention.
     seg_feat.SetField(SEG_ROUTE_DIST_FIELD, "%.0f" % seg_ref.route_dist_on_seg)
     seg_feat.SetField(SEG_FREE_SPEED_FIELD, 0.0)
