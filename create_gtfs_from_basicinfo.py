@@ -49,8 +49,9 @@ def save_seq_stop_speed_info(seq_stop_info, next_segment, stops_lyr,
             tp_model.SEG_PEAK_SPEED_FIELD)
     except ValueError:
         if use_seg_speeds == True:
-            print "ERROR: you asked to use per-segment speeds when calculating "\
-                "timetable, but given segments shapefile is missing field '%s'"\
+            print "ERROR: you asked to use per-segment speeds when "\
+                "calculating timetable, but given segments shapefile is "\
+                "missing field '%s'"\
                 % (tp_model.SEG_PEAK_SPEED_FIELD)
             sys.exit(1)
         else:
@@ -61,9 +62,9 @@ def save_seq_stop_speed_info(seq_stop_info, next_segment, stops_lyr,
             tp_model.SEG_FREE_SPEED_FIELD)
     except ValueError:
         if use_seg_speeds == True:
-            print "ERROR: you asked to use per-segment speeds when calculating "\
-                "timetable, but given segments shapefile is missing field '%s'"\
-                % (tp_model.SEG_FREE_SPEED_FIELD)
+            print "ERROR: you asked to use per-segment speeds when "\
+                "calculating timetable, but given segments shapefile is "\
+                "missing field '%s'" % (tp_model.SEG_FREE_SPEED_FIELD)
             sys.exit(1)
         else:
             # Ok to continue in this case.
@@ -352,7 +353,8 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id,
 
 def create_gtfs_trip_stoptimes(trip, trip_start_time,
         trip_start_period, serv_headways,
-        route_def, prebuilt_stop_info_list, mode_config, schedule, use_seg_speeds):
+        route_def, prebuilt_stop_info_list, mode_config, schedule,
+        use_seg_speeds):
     """Creates the actual stop times on a route.
     Since Apr 2014, now needs to access curr_period and serv_headways,
     since we are allowing for time-dependent vehicle speeds by serv period.
@@ -540,10 +542,10 @@ if __name__ == "__main__":
         'Should end in .zip')
     parser.add_option('--usesegspeeds', dest='usesegspeeds', 
         help='Use per-segment speeds defined in route segments shapefile? '\
-        'If false, then will just use a constant speed defined per mode.')
+            'If false, then will just use a constant speed defined per mode.')
     parser.add_option('--memorydb', dest='memorydb', 
-        help='Should the GTFS schedule use an in-memory DB, or file based one? '\
-        'creating large GTFS schedules can be memory-hungry.')
+        help='Should the GTFS schedule use an in-memory DB, or file based '\
+            'one? Creating large GTFS schedules can be memory-hungry.')
     parser.set_defaults(output='google_transit.zip', usesegspeeds='True',
         memorydb='True')
     (options, args) = parser.parse_args()
