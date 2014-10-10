@@ -34,6 +34,7 @@ ON_MOTORWAY_FIELD = 'mway'
 STOP_TYPE_ROUTE_START_END = "ROUTE_START_END"
 STOP_TYPE_SELF_TFER = "TRANSFER_SELF"
 STOP_TYPE_FILLERS = "FILLERS"
+STOP_TYPE_FROM_EXISTING_GTFS = "FROM_EXISTING_GTFS"
 
 #################
 # Low-level functions to add new fields or check required ones exist.
