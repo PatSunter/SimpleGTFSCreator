@@ -456,8 +456,6 @@ def build_segment_speeds_by_dir_serv_period(trip_dict, p_keys,
                 # We need to calculate a 'smoothed' travel time and thus
                 # speed, over several segments :- since for many GTFS feeds,
                 # stop times are rounded to the minute.
-                #import pdb
-                #pdb.set_trace()
                 seg_speed_km_h = calc_speed_on_segment_with_nearby_segs(
                     trip_stop_time_pairs, stop_time_pair, seg_i,
                     seg_distances, min_dist_for_speed_calc_m, 

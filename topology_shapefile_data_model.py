@@ -172,10 +172,10 @@ def get_route_segment(segment_id, route_segments_lyr):
     route_segments_lyr.ResetReading()        
     return match_feature
 
-def get_other_stop_name(segment, stop_name):
-    stop_name_a = segment.GetField(SEG_STOP_1_NAME_FIELD)
+def get_other_stop_name(seg_feat, stop_name):
+    stop_name_a = seg_feat.GetField(SEG_STOP_1_NAME_FIELD)
     if stop_name == stop_name_a:
-        return segment.GetField(SEG_STOP_2_NAME_FIELD)
+        return seg_feat.GetField(SEG_STOP_2_NAME_FIELD)
     else:
         return stop_name_a
 
