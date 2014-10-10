@@ -101,6 +101,8 @@ def read_route_defs(csv_file_name, do_sort=True):
         route_defs.append(route_def)
     if do_sort == True:
         route_defs.sort(key=get_route_num)        
+
+    csv_file.close()
     return route_defs
 
 
