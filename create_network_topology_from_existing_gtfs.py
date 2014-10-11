@@ -58,6 +58,11 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id,
 
     route_dir_serv_period_pairs = \
         gtfs_ops.extract_route_dir_serv_period_tuples(trip_dict)
+    # The use of set() will remove duplicates
+    route_dirs = list(set(map(operator.itemgetter(0),
+        route_dir_serv_period_pairs)))
+    assert len(route_dirs) == 2
+    master_dir = route_dirs[0]
 
     print "Calculating full-stop pattern of segments for route %s:" \
         % rname
@@ -66,6 +71,11 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id,
         # According to the API, all of these trips in this trip pattern
         # have the same stop pattern. So just look at first one here.
         stop_visit_pattern = trips[0].GetPattern()
+        if trips[0].trip_headsign != master_dir:
+            # We're only going to worry about one direction.
+            # Important for trams and buses that often have stops on
+            # opposite sides of the street.
+            continue
         
         for seg_i, stop_pair in enumerate(pairs(stop_visit_pattern)):
             stop_a = stop_pair[0]
@@ -87,12 +97,6 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id,
         all_pattern_segments, seg_links)
 
     # TODO: these route_dirs a bit problematic ...
-    # The use of set() will remove duplicates
-    route_dirs = list(set(map(operator.itemgetter(0),
-        route_dir_serv_period_pairs)))
-    assert len(route_dirs) == 2
-    # HACK!
-    master_dir = route_dirs[0]
     route_dirs = (master_dir, route_dirs[1-route_dirs.index(master_dir)])
     return full_stop_pattern_seg_links, route_dirs
 
