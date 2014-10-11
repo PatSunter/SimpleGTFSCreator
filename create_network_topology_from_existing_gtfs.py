@@ -49,13 +49,18 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id,
     all_pattern_segments = []
 
     gtfs_route = schedule.routes[gtfs_route_id]
+    rname = gtfs_route.route_short_name
+    if not rname:
+        rname = gtfs_route.route_long_name
+    str(rname)
     trip_dict = gtfs_route.GetPatternIdTripDict()
     p_keys = trip_dict.keys()
 
     route_dir_serv_period_pairs = \
         gtfs_ops.extract_route_dir_serv_period_tuples(trip_dict)
 
-    temp_id = 0
+    print "Calculating full-stop pattern of segments for route %s:" \
+        % rname
     for p_ii, p_key in enumerate(p_keys):
         trips = trip_dict[p_keys[p_ii]]
         # According to the API, all of these trips in this trip pattern
@@ -69,45 +74,27 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id,
             second_stop_id = gtfs_stop_id_to_stop_id_map[stop_b.stop_id]
             rdist_on_seg = gtfs_ops.get_update_seg_dist_m(seg_distances,
                 stop_pair)
-            new_seg_ref = route_segs.Seg_Reference(temp_id, first_stop_id,
-                second_stop_id, rdist_on_seg)
-            temp_id += 1
-            all_pattern_segments.append(new_seg_ref)
+            route_segs.add_update_seg_ref(first_stop_id, second_stop_id,
+                rname, rdist_on_seg, all_pattern_segments,
+                [])
             
     # (Now all segment pairs for the route are assembled:-)
-    
     # (We now want to find a way to get the 'full-stop' seg pattern for the
     # route - possibly by first excluding express stops.
 
-    # seg_ops.build_seg_links(all_route_segs), 
-    # Note:- need to start with a particular direction.
+    seg_links = route_segs.build_seg_links(all_pattern_segments)
+    full_stop_pattern_seg_links = route_segs.get_full_stop_pattern_segs(
+        all_pattern_segments, seg_links)
 
-    # Then we also need to build :- for each pair of stops, every set of
-    # linking segments between them.
-    # To then get the 'full-stop' pattern, we then need a modified
-    # order_based_on_links(), that:-
-     # Finds a start or end segment (that has only one link)
-     # Starts building from there.
-     # When reaching a segment with multiple forward links:-
-       # then, try each of these fwd-link sets in turn:-
-       # count how many links before they reach each of the other link sets
-       # we want the segment that reaches all other stops in other branches -
-       # this is the full-stop segment.
-     # Choose this branch, continue.  
-
-    # Use funcs in create_route_defs / route_segs:-
-    # then order_based_on_links()
-
-    # new algorithm end
-
-    # The set function will remove duplicates
-    # TODO:- I actually need to make sure the first route_dir in this list
-    #  corresponds to the start->finsih order the route_seg_refs are going
-    #  to be returned in.
+    # TODO: these route_dirs a bit problematic ...
+    # The use of set() will remove duplicates
     route_dirs = list(set(map(operator.itemgetter(0),
         route_dir_serv_period_pairs)))
-
-    return route_seg_refs, route_dirs
+    assert len(route_dirs) == 2
+    # HACK!
+    master_dir = route_dirs[0]
+    route_dirs = (master_dir, route_dirs[1-route_dirs.index(master_dir)])
+    return full_stop_pattern_seg_links, route_dirs
 
 def add_route_segments_from_gtfs(schedule, segments_lyr,
         stops_lyr, gtfs_stop_id_to_stop_id_map, mode_config):
@@ -134,6 +121,8 @@ def add_route_segments_from_gtfs(schedule, segments_lyr,
         rname = gtfs_route.route_short_name
         if not rname:
             rname = gtfs_route.route_long_name
+        # OGR doesn't like writing unicode Python, so stringify here.
+        rname = str(rname)
         updated_segs_this_route = []
         for seg in route_segments_initial[gtfs_route_id]:
             route_segs.add_update_seg_ref(seg.first_id, seg.second_id,

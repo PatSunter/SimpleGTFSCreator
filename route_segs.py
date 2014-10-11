@@ -56,7 +56,9 @@ class Seg_Reference:
         self.seg_ii = None    # Index into segments layer shapefile -
     
 def add_route_to_seg_ref(seg_ref, route_name):
-    seg_ref.routes.append(route_name)
+    if route_name not in seg_ref.routes:
+        seg_ref.routes.append(route_name)
+    return    
 
 def seg_has_stops(seg_ref, stop_id_1, stop_id_2):
     if seg_ref.first_id == stop_id_1 and \
@@ -100,7 +102,8 @@ def find_seg_ref_matching_stops(all_seg_refs, stop_id_1, stop_id_2):
     return matched_seg_ref
             
 def add_update_seg_ref(start_stop_id, end_stop_id, route_name,
-        route_dist_on_seg, all_seg_refs, seg_refs_this_route):
+        route_dist_on_seg, all_seg_refs, seg_refs_this_route,
+        possible_route_duplicates=False):
     """Add a new segment to the two pre-existing lists all_seg_refs, and 
     seg_refs_this_route. If segment already exists, update its route list."""
     seg_id = None
@@ -117,6 +120,15 @@ def add_update_seg_ref(start_stop_id, end_stop_id, route_name,
         #    route_name)
         add_route_to_seg_ref(matched_seg_ref, route_name)
         seg_ref_to_return = matched_seg_ref
+        if possible_route_duplicates:
+            # Adding a new defensive case:- don't want to add a segment twice to
+            #  the same route.
+            matched_in_route = find_seg_ref_matching_stops(seg_refs_this_route,
+                start_stop_id, end_stop_id)
+            if not matched_seg_ref:
+                seg_refs_this_route.append(seg_ref_to_return)
+        else:
+            seg_refs_this_route.append(seg_ref_to_return)
     else:
         new_status = True
         # +1 since we want to start counter at 1
@@ -126,13 +138,14 @@ def add_update_seg_ref(start_stop_id, end_stop_id, route_name,
         # Its a new segment, so append to the list of all segments.
         all_seg_refs.append(new_seg_ref)
         seg_ref_to_return = new_seg_ref
-    seg_refs_this_route.append(seg_ref_to_return)
+        seg_refs_this_route.append(seg_ref_to_return)
+
     return seg_ref_to_return, new_status
 
 #########
 ### Functions to do with querying network topology
 
-def segs_linked(seg1, seg2):
+def find_linking_stop_id(seg1, seg2):
     """Checks if two segments are linked by a common stop. If true, returns
     the ID of the linking stop. If they don't link, returns None."""
     if seg1.first_id == seg2.first_id or seg1.first_id == seg2.second_id:
@@ -141,12 +154,20 @@ def segs_linked(seg1, seg2):
         return seg1.second_id
     return None
 
+def find_non_linking_stop_id(seg1, seg2):
+    """Find the stop in seg1 that doesn't link to seg2."""
+    if seg1.first_id == seg2.first_id or seg1.first_id == seg2.second_id:
+        return seg1.second_id
+    elif seg1.second_id == seg2.first_id or seg1.second_id == seg2.second_id:
+        return seg1.first_id
+    return None
+
 def get_stop_order(seg_ref, next_seg_ref):
     """Use the fact that for two segments, in the first segment, there must be
     a matching stop with the 2nd segment. Return the IDs of the 1st and 2nd 
     stops in the first segment."""
     
-    linking_stop_id = segs_linked(seg_ref, next_seg_ref)
+    linking_stop_id = find_linking_stop_id(seg_ref, next_seg_ref)
     if linking_stop_id is None:
         print "Error, in segment with id %d, next seg id is %d, "\
             "stop a is #%d, stop b is #%d, "\
@@ -164,36 +185,37 @@ def get_stop_order(seg_ref, next_seg_ref):
 def build_seg_links(route_seg_refs):
     """Create a dictionary, which for each segment ID, gives the list 
     of other segments linked to that id via a common stop."""
-    seglinks = {}
+    seg_links = {}
     for seg in route_seg_refs:
-        seglinks[seg.seg_id] = []
+        seg_links[seg.seg_id] = []
     for ii, seg in enumerate(route_seg_refs[:-1]):
         for other_seg in route_seg_refs[ii+1:]:
-            if segs_linked(seg, other_seg):
-                seglinks[seg.seg_id].append(other_seg.seg_id)
-                seglinks[other_seg.seg_id].append(seg.seg_id)
-    return seglinks
+            if find_linking_stop_id(seg, other_seg) is not None:
+                seg_links[seg.seg_id].append(other_seg.seg_id)
+                seg_links[other_seg.seg_id].append(seg.seg_id)
+    return seg_links
 
-def order_segs_based_on_links(route_seg_refs, seglinks):
+def order_segs_based_on_links(route_seg_refs, seg_links):
     """Construct and ordered list of all segments within a route
     (given in list route_seg_refs), based on their links via common stops."""
     # Ok: start with one of the segments that only has one link
     start_seg_id = None
-    for seg_id, links in seglinks.iteritems():
+    for seg_id, links in seg_links.iteritems():
         if len(links) == 1:
             start_seg_id = seg_id
             break
     if start_seg_id is None:
         print "Error: no segment with 1 link."
         sys.exit(1)
+
     ordered_seg_refs = [get_seg_ref_with_id(start_seg_id, route_seg_refs)]
-    last_link_id = start_seg_id
-    curr_id = seglinks[start_seg_id][0]
+    prev_seg_id = start_seg_id
+    curr_seg_id = seg_links[start_seg_id][0]
 
     while True:
-        curr_seg_ref = get_seg_ref_with_id(curr_id, route_seg_refs)
+        curr_seg_ref = get_seg_ref_with_id(curr_seg_id, route_seg_refs)
         ordered_seg_refs.append(curr_seg_ref)
-        links = seglinks[curr_id]
+        links = seg_links[curr_seg_id]
         if len(links) > 2:
             print "Error, segment %d is linked to %d other segments %s" %\
                 (currseg, len(links), links)
@@ -201,13 +223,13 @@ def order_segs_based_on_links(route_seg_refs, seglinks):
         if len(links) == 1:
             # We have reached the final segment in the route.
             break
-        next_link_id = None
+        next_seg_id = None
         for link_seg_id in links:
-            if link_seg_id != last_link_id:
-                next_link_id = link_seg_id
-        assert next_link_id is not None
-        last_link_id = curr_id
-        curr_id = next_link_id
+            if link_seg_id != prev_seg_id:
+                next_seg_id = link_seg_id
+        assert next_seg_id is not None
+        prev_seg_id = curr_seg_id
+        curr_seg_id = next_seg_id
 
     if len(route_seg_refs) != len(ordered_seg_refs):
         print "Error: total # segments for this route is %d, but only "\
@@ -221,34 +243,194 @@ def order_segs_based_on_links(route_seg_refs, seglinks):
         sys.exit(1)
     return ordered_seg_refs
 
-def order_all_route_segments(all_routes, rnames_sorted=None):
+def get_set_of_stops_in_route_so_far(segs_so_far):
+    stop_ids_in_route_so_far = map(operator.attrgetter('first_id'),
+        segs_so_far)
+    stop_ids_in_route_so_far += map(operator.attrgetter('second_id'),
+        segs_so_far)
+    stop_ids_in_route_so_far = set(stop_ids_in_route_so_far)    
+    return stop_ids_in_route_so_far
+
+def get_link_with_shortest_dist(link_ids, all_pattern_segs,
+        link_dest_stop_ids_disallowed):
+    # Trying algorithm of choosing segment with shortest distance.
+    min_direct_dist = float("inf")
+    min_dist_seg_id = None
+    for link_seg_id in link_ids:
+        link_seg = get_seg_ref_with_id(link_seg_id, all_pattern_segs)
+        if link_seg.first_id in link_dest_stop_ids_disallowed \
+                or link_seg.second_id in link_dest_stop_ids_disallowed:
+            continue
+        if link_seg.route_dist_on_seg < min_direct_dist:
+            min_direct_dist = link_seg.route_dist_on_seg
+            min_dist_seg_id = link_seg_id
+    return min_dist_seg_id
+
+def get_full_stop_pattern_segs(all_pattern_segs, seg_links):
+    """More advanced function to build a list of segments into a route :-
+    this time by finding a 'full-stop' pattern linking all the segments.
+
+    (This is useful if you're trying to reconstruct a single full-stop pattern
+    from a set of all segments derived from a GTFS file with varying stop 
+    patterns throughout the day.)
+
+    (Note: current implementation assumes no 'branching' of the route, else
+     certain of the branches will just be ignored.)
+    """
+    full_stop_pattern_segs = []
+
+    # Ok: start with a search for one of the segments that only has one link
+    start_seg_id = None
+    multiple_start_links = False
+    for seg_id, link_ids in seg_links.iteritems():
+        if len(link_ids) == 1:
+            start_seg_id = seg_id
+            break
+    if start_seg_id is None:
+        # Fallback case :- just start with the 0th segment. Implies both
+        #  ends of the line have an express option attached.
+        # TODO:- why do I start seg ids at 1? Maybe change to 0 throughout
+        #  code ...
+        print "This route has no segments with only one link, so falling "\
+            "back to just start processing from first segment."
+        start_seg_id = 1
+        multiple_start_links = True
+    start_seg_ref = get_seg_ref_with_id(start_seg_id, all_pattern_segs)
+    full_stop_pattern_segs.append(start_seg_ref)
+
+    if multiple_start_links:
+        init_link_ids = seg_links[start_seg_id]
+        first_link_seg_id = get_link_with_shortest_dist(init_link_ids,
+            all_pattern_segs, [])
+    else:
+        init_link_ids = seg_links[start_seg_id]
+        first_link_seg_id = init_link_ids[0]
+
+    seg_chain, chain_len = get_longest_seg_linked_chain(first_link_seg_id,
+        all_pattern_segs, full_stop_pattern_segs, seg_links)
+    full_stop_pattern_segs += seg_chain
+
+    if multiple_start_links and len(full_stop_pattern_segs) > 1:
+        # Special case for if we started in the middle of a line
+        rem_init_link_ids = list(init_link_ids)
+        rem_init_link_ids.remove(first_link_seg_id)
+        first_stop_id = find_non_linking_stop_id(full_stop_pattern_segs[0],
+            full_stop_pattern_segs[1])
+        stop_ids_in_route_so_far = get_set_of_stops_in_route_so_far(
+            full_stop_pattern_segs) 
+        for link_seg_id in rem_init_link_ids:
+            link_seg_ref = get_seg_ref_with_id(link_seg_id, all_pattern_segs)
+            # There are legitimate cases where this link might not be from
+            #  the first stop.
+            if first_stop_id not in \
+                    (link_seg_ref.first_id, link_seg_ref.second_id):
+                continue
+            non_link_stop = get_other_stop_id(link_seg_ref, first_stop_id)
+            if non_link_stop not in stop_ids_in_route_so_far:
+                # we have an unexplored section, not an express.
+                # Reverse current route and start adding to it from new sec.
+                full_stop_pattern_segs.reverse()
+                seg_chain, chain_len = get_longest_seg_linked_chain(
+                    link_seg_id, all_pattern_segs,
+                    full_stop_pattern_segs, seg_links)
+                full_stop_pattern_segs += seg_chain
+                break
+
+    return full_stop_pattern_segs 
+
+def get_longest_seg_linked_chain(curr_seg_id, all_segs, segs_visited_so_far,
+        seg_links):
+
+    longest_chain_len = 0
+    seg_chain = []
+    prev_seg_ref = segs_visited_so_far[-1]
+    prev_seg_id = prev_seg_ref.seg_id
+    stop_ids_in_route_so_far = get_set_of_stops_in_route_so_far(
+        segs_visited_so_far) 
+
+    while True:
+        curr_seg_ref = get_seg_ref_with_id(curr_seg_id, all_segs)
+        seg_chain.append(curr_seg_ref)
+        curr_stop_id = find_non_linking_stop_id(curr_seg_ref, prev_seg_ref)
+        stop_ids_in_route_so_far.add(curr_stop_id)
+        link_ids = seg_links[curr_seg_id]
+        next_seg_id = None
+        if len(link_ids) == 1:
+            # We have reached the final segment in the route.
+            break
+        elif len(link_ids) == 2:
+            for link_seg_id in link_ids:
+                if link_seg_id != prev_seg_id:
+                    next_seg_id = link_seg_id
+            assert next_seg_id is not None
+            # We need this extra check to avoid loops back into existing
+            #  stops.
+            next_seg_ref = get_seg_ref_with_id(next_seg_id, all_segs)
+            next_stop_id = find_non_linking_stop_id(next_seg_ref, curr_seg_ref)
+            if next_stop_id in stop_ids_in_route_so_far:
+                print "Warning:- single forward link found from seg %d "\
+                    "to seg %d, but this next seg links back to an "\
+                    "already visited stop. So breaking here."\
+                    % (curr_seg_id, next_seg_id)
+                break    
+        else:
+            # This means there is either a 'branch', 'express' section,
+            #  or a loop.
+            link_ids.remove(prev_seg_id)
+            stops_disallowed = set(stop_ids_in_route_so_far)
+            stops_disallowed.remove(curr_stop_id)
+            #link_seg_ids = get_links_sorted_by_distance(link_ids,
+            #   all_segs, stops_disallowed)
+            next_seg_id = get_link_with_shortest_dist(link_ids,
+                all_segs, stops_disallowed)
+            if next_seg_id is None:
+                print "Warning: multiple links from current segment, but "\
+                    "all of them looped back to an already used segment. "\
+                    "So breaking here (last added seg ID was %d)."\
+                    % curr_seg_id
+                break
+        # Defensive check
+        if next_seg_id in map(operator.attrgetter('seg_id'),
+                segs_visited_so_far):
+            print "Warning, we found a loop in segments while constructing "\
+                "full-stop pattern - breaking with loop seg id being %d."\
+                % next_seg_id
+            break
+        prev_seg_id = curr_seg_id
+        prev_seg_ref = curr_seg_ref
+        curr_seg_id = next_seg_id
+        longest_chain_len += 1    
+    return seg_chain, longest_chain_len
+
+def order_all_route_segments(all_segs_by_route, rnames_sorted=None):
     # Now order each route properly ...
     # for each route - find unique stop names 
     if rnames_sorted == None:
-        rnames_sorted = get_route_names_sorted(all_routes.keys())
+        rnames_sorted = get_route_names_sorted(all_segs_by_route.keys())
     routes_ordered = {}
     route_dirs = {}
     for rname in rnames_sorted:
         print "Ordering segments by traversal for route '%s'" % rname
-        route_seg_refs = all_routes[rname]
+        route_seg_refs = all_segs_by_route[rname]
         if len(route_seg_refs) == 1:
-            routes_ordered[rname] = route_seg_refs
+            segs_by_route_ordered[rname] = route_seg_refs
             startstop = route_seg_refs[0].first_id
             endstop = route_seg_refs[0].second_id
         else:
-            seglinks = build_seg_links(route_seg_refs)
-            ordered_seg_refs = order_segs_based_on_links(route_seg_refs, seglinks)
-            routes_ordered[rname] = ordered_seg_refs
+            seg_links = build_seg_links(route_seg_refs)
+            ordered_seg_refs = order_segs_based_on_links(route_seg_refs,
+                seg_links)
+            segs_by_route_ordered[rname] = ordered_seg_refs
             # Now create the directions
             first_seg, second_seg = ordered_seg_refs[0], ordered_seg_refs[1]
-            linkstop = segs_linked(first_seg, second_seg)
+            linkstop = find_linking_stop_id(first_seg, second_seg)
             if first_seg.first_id != linkstop:
                 startstop = first_seg.first_id
             else:
                 startstop = first_seg.second_id
             last_seg = ordered_seg_refs[-1]
             second_last_seg = ordered_seg_refs[-2]
-            linkstop = segs_linked(last_seg, second_last_seg)
+            linkstop = find_linking_stop_id(last_seg, second_last_seg)
             if last_seg.first_id != linkstop:
                 endstop = last_seg.first_id
             else:
@@ -256,8 +438,9 @@ def order_all_route_segments(all_routes, rnames_sorted=None):
         dir1 = "%s->%s" % (startstop, endstop)
         dir2 = "%s->%s" % (endstop, startstop)
         route_dirs[rname] = (dir1, dir2)
-    assert len(routes_ordered) == len(all_routes) == len(route_dirs)
-    return routes_ordered, route_dirs
+    assert len(segs_by_route_ordered) == len(all_segs_by_route)
+    assert len(segs_by_route_ordered) == len(route_dirs)
+    return segs_by_route_ordered, route_dirs
 
 def extract_stop_list_along_route(seg_refs):
     stop_ids = []
@@ -326,7 +509,12 @@ def create_ordered_seg_refs_from_ids(ordered_seg_ids, segs_lookup_table):
 def get_route_num(route_def):
     rname = route_def.name
     # Courtesy http://stackoverflow.com/questions/4289331/python-extract-numbers-from-a-string
-    return int(re.findall(r'\d+', rname)[0])
+    try:
+        rnum = int(re.findall(r'\d+', rname)[0])
+    except IndexError:
+        # Fallback to just using entire route name.
+        rnum = rname
+    return rnum
 
 def read_route_defs(csv_file_name, do_sort=True):
     """Reads a CSV of route_defs, into a list of 'route_defs'.
