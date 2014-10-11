@@ -344,14 +344,14 @@ def calc_seg_speed_km_h(seg_dist_m, seg_trav_time_s):
             float(seg_trav_time_s / float(SECS_PER_HOUR))
     return seg_speed_km_h
 
-def get_update_seg_dist_m(seg_distances, stop_time_pair):
-    s_id_pair = (stop_time_pair[0].stop.stop_id,
-        stop_time_pair[1].stop.stop_id)
+def get_update_seg_dist_m(seg_distances, stop_pair):
+    s_id_pair = (stop_pair[0].stop_id,
+        stop_pair[1].stop_id)
     try:
         seg_dist_m = seg_distances[s_id_pair]
     except KeyError:
-        seg_dist_m = calc_distance(stop_time_pair[0].stop,
-            stop_time_pair[1].stop)
+        seg_dist_m = calc_distance(stop_pair[0],
+            stop_pair[1])
         seg_distances[s_id_pair] = seg_dist_m
     return seg_dist_m
 
@@ -450,10 +450,11 @@ def build_segment_speeds_by_dir_serv_period(trip_dict, p_keys,
             for seg_i, stop_time_pair in enumerate(trip_stop_time_pairs):
                 s_id_pair = (stop_time_pair[0].stop.stop_id,
                     stop_time_pair[1].stop.stop_id)
+                stop_pair = (stop_time_pair[0].stop, stop_time_pair[1].stop)
                 s_arr_time_pair = (stop_time_pair[0].arrival_secs,
                     stop_time_pair[1].arrival_secs)
                 seg_dist_m = get_update_seg_dist_m(seg_distances,
-                    stop_time_pair)
+                    stop_pair)
 
                 # We need to calculate a 'smoothed' travel time and thus
                 # speed, over several segments :- since for many GTFS feeds,
