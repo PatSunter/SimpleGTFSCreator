@@ -22,6 +22,8 @@ SECS_PER_DAY = SECS_PER_HOUR * 24
 
 DEFAULT_FALLBACK_SEG_SPEED_KM_H = 10.0
 
+ALLOWED_ROUTE_NAME_TYPES = ['route_short_name', 'route_long_name']
+
 # Converting transitfeed's basic time representation, to Python times,
 #   and vice-versa
 
@@ -109,6 +111,12 @@ def getRouteByLongName(schedule, long_name):
         if route.route_long_name == long_name:
             return r_id, route
     return None, None
+
+def getStopWithName(schedule, stop_name):
+    for s_id, stop in schedule.stops.iteritems():
+        if stop.stop_name == stop_name:
+            return s_id, stop
+    return None, None            
 
 # Tools for manipulating a schedule, and/or adding to a new schedule.
 
