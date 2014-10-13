@@ -61,7 +61,9 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id,
     # The use of set() will remove duplicates
     route_dirs = list(set(map(operator.itemgetter(0),
         route_dir_serv_period_pairs)))
-    assert len(route_dirs) == 2
+    # Some routes have >2 headsigns (e.g. that finish mid-way along
+    # route in certain trips.
+    #assert len(route_dirs) == 2
     master_dir = route_dirs[0]
 
     print "Calculating full-stop pattern of segments for route %s:" \
