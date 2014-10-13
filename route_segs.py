@@ -283,7 +283,23 @@ def get_links_sorted_by_distance(link_seg_ids, all_pattern_segs,
         link_seg_ids_sorted_by_dist = None
     return link_seg_ids_sorted_by_dist
 
-def get_full_stop_pattern_segs(all_pattern_segs, seg_links):
+def get_seg_ids_that_include_stop_id(all_pattern_segs, force_first_stop_id):
+    seg_ids_that_include_stop = []
+    for seg in all_pattern_segs:
+        if force_first_stop_id in (seg.first_id, seg.second_id):
+            seg_ids_that_include_stop.append(seg.seg_id)
+    return seg_ids_that_include_stop 
+
+def get_seg_ids_with_minimum_links(seg_ids, seg_links):
+    min_link_segs = []
+    min_links = min([len(seg_links[seg_id]) for seg_id in seg_ids])
+    for seg_id in seg_ids:
+        if len(seg_links[seg_id]) == min_links:
+            min_link_segs.append(seg_id)
+    return min_link_segs, min_links
+
+def get_full_stop_pattern_segs(all_pattern_segs, seg_links,
+        force_first_stop_id=None):
     """More advanced function to build a list of segments into a route :-
     this time by finding a 'full-stop' pattern linking all the segments.
 
@@ -291,43 +307,72 @@ def get_full_stop_pattern_segs(all_pattern_segs, seg_links):
     from a set of all segments derived from a GTFS file with varying stop 
     patterns throughout the day.)
 
-    (Note: current implementation assumes no 'branching' of the route, else
-     certain of the branches will just be ignored.)
-    """
-    full_stop_pattern_segs = []
+    (Note: current implementation is unlikely to deal with branching routes
+    well. It will follow the branch with the most segments, won't include
+    other branches.)
 
-    # Ok: start with a search for one of the segments that only has one link
-    start_seg_id = None
-    multiple_start_links = False
-    for seg_id, link_seg_ids in seg_links.iteritems():
-        if len(link_seg_ids) == 1:
-            start_seg_id = seg_id
-            break
-    if start_seg_id is None:
-        print "This route has no segments with only one link."
-        multiple_start_links = True
-        # Fallback case.
-        num_links = [len(ls) for ls in seg_links.values()]
-        min_links = min(num_links)
-        print "Minimum links of any segment is %d" % min_links
-        # Try the starts and ends first.
-        candidate_start_seg_ids = []
+    Note re alg tuning and force_first_stop_id argument:- after a fair bit
+    of effort I was able to make the algorithm produce sensible results for
+    the 'full stop' version of routes with expresses and a 'city loop' trains
+    in most cases. However a few cases such as the Belgrave line in Melbourne
+    are difficult to come up with a good outcome with no initial information.
+
+    Therefore there is a force_first_stop_id argument that allows to force
+    beginning the segment-chain building algorithm at a particular stop, to
+    help get a good result.
+    """
+
+    full_stop_pattern_segs = []
+    all_seg_ids = map(operator.attrgetter('seg_id'), all_pattern_segs) 
+
+    if force_first_stop_id is None:
+        # Ok: start with a search for one of the segments that 
+        # only has one link - and is therefore an end of the route.
+        start_seg_id = None
+        multiple_start_links = False
         for seg_id, link_seg_ids in seg_links.iteritems():
-            if len(link_seg_ids) == min_links:
-                candidate_start_seg_ids.append(seg_id)
-        min_dist_from_end = float("inf")
-        for seg_id in candidate_start_seg_ids:
-            dist_from_end = min(seg_id - 1, len(all_pattern_segs) - seg_id)
-            if dist_from_end < min_dist_from_end:
-                min_dist_from_end = dist_from_end
+            if len(link_seg_ids) == 1:
                 start_seg_id = seg_id
-                if dist_from_end == 0:
-                    break
-        print "Starting with seg to have this # of links closest to "\
-            "start or end = seg #%s" % start_seg_id
+                break
+        if start_seg_id is None:
+            print "This route has no segments with only one link."
+            multiple_start_links = True
+            # Fallback case.
+            candidate_start_seg_ids, min_links = get_seg_ids_with_minimum_links(
+                all_seg_ids, seg_links)
+            print "Minimum links of any seg is %d" % min_links
+            # Try the starts and ends first.
+            min_dist_from_end = float("inf")
+            for seg_id in candidate_start_seg_ids:
+                dist_from_end = min(seg_id - 1, len(all_pattern_segs) - seg_id)
+                if dist_from_end < min_dist_from_end:
+                    min_dist_from_end = dist_from_end
+                    start_seg_id = seg_id
+                    if dist_from_end == 0:
+                        break
+            print "Starting with seg to have this # of links closest to "\
+                "start or end = seg #%s" % start_seg_id
+    else:
+        # Force a start at a segment that includes the given stop.
+        # This stop may still be included in several segments, so use the 
+        # segment with the least links and shortest.
+        print "Forcing start of building chain at stop ID %d" \
+            % force_first_stop_id
+        candidate_segs = get_seg_ids_that_include_stop_id(all_pattern_segs,
+            force_first_stop_id)
+        revised_cand_segs, min_links = get_seg_ids_with_minimum_links(
+            candidate_segs, seg_links)
+        if min_links > 1:
+            multiple_start_links = True
+        start_seg_id = get_link_with_shortest_dist(revised_cand_segs,
+            all_pattern_segs, [])
+        print "Starting with seg %d, which has %d links, and is the "\
+            "shortest seg with this many links." \
+            % (start_seg_id, min_links)
+
+    #print "Added start seg %d." % start_seg_id
     start_seg_ref = get_seg_ref_with_id(start_seg_id, all_pattern_segs)
     full_stop_pattern_segs.append(start_seg_ref)
-    #print "Added start seg %d." % start_seg_id
 
     if multiple_start_links:
         init_link_seg_ids = seg_links[start_seg_id]
@@ -608,8 +653,9 @@ def read_route_defs(csv_file_name, do_sort=True):
      directions: a tuple of two strings, the route directions.
      segments: a list of (ordered) route segments IDs."""
     route_defs = []
-    csv_file = open(csv_file_name, 'r')
-    if csv_file is None:
+    try:
+        csv_file = open(csv_file_name, 'r')
+    except IOError:
         print "Error, route mapping CSV file given, %s , failed to open." \
             % (csv_file_name)
         sys.exit(1) 

@@ -4,12 +4,12 @@ import os.path
 import sys
 import inspect
 import operator
+import csv
 from optparse import OptionParser
 
+import transitfeed
 import osgeo.ogr
 from osgeo import ogr, osr
-
-import transitfeed
 
 import parser_utils
 import topology_shapefile_data_model as tp_model
@@ -42,7 +42,7 @@ def add_all_stops_from_gtfs(schedule, stops_lyr, stops_multipoint):
     return gtfs_stop_id_to_stop_id_map
 
 def calc_seg_refs_for_route(schedule, gtfs_route_id,
-        gtfs_stop_id_to_stop_id_map, seg_distances):
+        gtfs_stop_id_to_stop_id_map, seg_distances, route_first_stop_id = None):
     """Calculate all the segments for a full-stop version of the route with
     specified GTFS ID."""
     route_seg_refs = []
@@ -93,15 +93,30 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id,
     # route - possibly by first excluding express stops.
 
     seg_links = route_segs.build_seg_links(all_pattern_segments)
-    full_stop_pattern_seg_links = route_segs.get_full_stop_pattern_segs(
-        all_pattern_segments, seg_links)
+    full_stop_pattern_segs = route_segs.get_full_stop_pattern_segs(
+        all_pattern_segments, seg_links, route_first_stop_id)
 
-    # TODO: these route_dirs a bit problematic ...
-    route_dirs = (master_dir, route_dirs[1-route_dirs.index(master_dir)])
-    return full_stop_pattern_seg_links, route_dirs
+    # Now calculate direction names, based on first and last stops.
+    stop_id_to_gtfs_stop_id_map = {}        
+    for gtfs_stop_id, stop_id in gtfs_stop_id_to_stop_id_map.iteritems():
+        stop_id_to_gtfs_stop_id_map[stop_id] = gtfs_stop_id
+    if len(full_stop_pattern_segs) == 1:
+        route_dirs = [seg_links[0].second_id, seg_links[0].first_id]
+    else:
+        first_stop_id = route_segs.find_non_linking_stop_id(
+            full_stop_pattern_segs[0], full_stop_pattern_segs[1])
+        last_stop_id = route_segs.find_non_linking_stop_id(
+            full_stop_pattern_segs[-1], full_stop_pattern_segs[-2])
+        first_stop_id_gtfs = stop_id_to_gtfs_stop_id_map[first_stop_id]
+        last_stop_id_gtfs = stop_id_to_gtfs_stop_id_map[last_stop_id]
+        first_stop_name = schedule.stops[first_stop_id_gtfs].stop_name
+        last_stop_name = schedule.stops[last_stop_id_gtfs].stop_name
+        route_dirs = (last_stop_name, first_stop_name)
+    return full_stop_pattern_segs, route_dirs
 
 def add_route_segments_from_gtfs(schedule, segments_lyr,
-        stops_lyr, gtfs_stop_id_to_stop_id_map, mode_config):
+        stops_lyr, gtfs_stop_id_to_stop_id_map, mode_config,
+        line_start_stop_info = None):
     """Add all the route segments from an existing GTFS file, to a GIS
     segments layer. Return the list of route_defs describing the routes."""
     route_defs = []
@@ -109,10 +124,44 @@ def add_route_segments_from_gtfs(schedule, segments_lyr,
     route_segments_initial = {}
     all_route_dirs = {}
     
+    force_start_stop_ids_by_gtfs_route_id = None
+    if line_start_stop_info:
+        force_start_stop_ids_by_gtfs_route_id = {}
+        r_name_type = line_start_stop_info[1]
+        for rname, stop_name in line_start_stop_info[0].iteritems():
+            if r_name_type == 'route_long_name':
+                r_id, r_info = gtfs_ops.getRouteByLongName(schedule, rname)
+            elif r_name_type == 'route_short_name':
+                r_id, r_info = gtfs_ops.getRouteByShortName(schedule, rname)
+            else:
+                print "Error: unrecognised route description keyword in "\
+                    "line_start_stop_info ('%s')" % r_name_type
+                sys.exit(1)
+            if r_id is None:
+                print "Warning:- route name specified in line start stop "\
+                    "info, '%s', of type '%s', not found in schedule. "\
+                    "Skipping." % (rname, r_name_type)
+                continue
+            gtfs_stop_id, s_info = gtfs_ops.getStopWithName(schedule, stop_name)
+            if gtfs_stop_id is None:
+                print "Warning:- stop name specified in line start stop "\
+                    "info, '%s', for route '%s', not found in schedule. "\
+                    "Skipping." % (stop_name, rname)
+                continue
+            first_stop_id = gtfs_stop_id_to_stop_id_map[gtfs_stop_id]
+            force_start_stop_ids_by_gtfs_route_id[r_id] = first_stop_id
     # Calculate the segments in the full-stop version of each route.
     for gtfs_route_id, gtfs_route in schedule.routes.iteritems():
+        force_first_stop_id = None
+        if force_start_stop_ids_by_gtfs_route_id:
+            try:
+                force_first_stop_id = \
+                    force_start_stop_ids_by_gtfs_route_id[gtfs_route_id]
+            except KeyError:
+                force_first_stop_id = None
         route_seg_refs, route_dirs = calc_seg_refs_for_route(schedule, 
-            gtfs_route_id, gtfs_stop_id_to_stop_id_map, seg_distances)
+            gtfs_route_id, gtfs_stop_id_to_stop_id_map, seg_distances,
+            force_first_stop_id)
         route_segments_initial[gtfs_route_id] = route_seg_refs
         all_route_dirs[gtfs_route_id] = route_dirs
 
@@ -156,6 +205,33 @@ def add_route_segments_from_gtfs(schedule, segments_lyr,
 
     return route_defs
 
+def parse_line_start_stops_csv_file(line_start_stop_info_csv_fname):
+    line_start_stop_dict = {}
+    try:
+        csv_file = open(line_start_stop_info_csv_fname, 'r')
+    except IOError:
+        print "Error, line start stop CSV file given, %s , failed to open." \
+            % (line_start_stop_info_csv_fname)
+        sys.exit(1) 
+    reader = csv.reader(csv_file, delimiter=',', quotechar="'") 
+    headers = reader.next()
+    route_name_type = headers[0]
+    if route_name_type not in gtfs_ops.ALLOWED_ROUTE_NAME_TYPES:
+        print "Error:- in line start stop info file %s, route type "\
+            "specified in column 0 of '%s' not in allowed types list "\
+            "%s." % (line_start_stop_info_csv_fname, route_name_type, \
+             gtfs_ops.ALLOWED_ROUTE_NAME_TYPES)
+        sys.exit(1)     
+    for ii, row in enumerate(reader):
+        rname = row[0]
+        stop_name = row[1]
+        line_start_stop_dict[rname] = stop_name
+    csv_file.close()
+    line_start_stop_info = None
+    if len(line_start_stop_dict) >= 1:
+        line_start_stop_info = line_start_stop_dict, route_name_type
+    return line_start_stop_info
+
 def main():
     allowedServs = ', '.join(sorted(["'%s'" % key for key in \
         m_t_info.settings.keys()]))
@@ -171,6 +247,10 @@ def main():
             ' (suggest should end in .csv)')
     parser.add_option('--service', dest='service',
         help="Should be one of %s" % allowedServs)        
+    parser.add_option('--line_start_stops', dest='line_start_stops',
+        help="Optional CSV file stating routes that should have the "\
+            "full-stop route-building algorithm forced to start at a specific "\
+            "stop.")
     (options, args) = parser.parse_args()
 
     if options.inputgtfs is None:
@@ -216,10 +296,16 @@ def main():
     segments_shp_file, segments_lyr = tp_model.create_segs_shp_file(
         segs_shp_file_name, delete_existing=DELETE_EXISTING)
 
+    line_start_stop_info = None
+    if options.line_start_stops:
+        line_start_stop_info = parse_line_start_stops_csv_file(
+            options.line_start_stops)
+
     gtfs_stop_id_to_stop_id_map = add_all_stops_from_gtfs(schedule,
         stops_lyr, stops_multipoint)
     route_defs = add_route_segments_from_gtfs(schedule, segments_lyr,
-        stops_lyr, gtfs_stop_id_to_stop_id_map, mode_config)
+        stops_lyr, gtfs_stop_id_to_stop_id_map, mode_config,
+        line_start_stop_info)
     # Force a write.
     stops_shp_file.Destroy()
     segments_shp_file.Destroy()
