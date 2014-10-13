@@ -103,7 +103,8 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id,
     for gtfs_stop_id, stop_id in gtfs_stop_id_to_stop_id_map.iteritems():
         stop_id_to_gtfs_stop_id_map[stop_id] = gtfs_stop_id
     if len(full_stop_pattern_segs) == 1:
-        route_dirs = [seg_links[0].second_id, seg_links[0].first_id]
+        route_dirs = (full_stop_pattern_segs[0].second_id, \
+            full_stop_pattern_segs[0].first_id)
     else:
         first_stop_id = route_segs.find_non_linking_stop_id(
             full_stop_pattern_segs[0], full_stop_pattern_segs[1])

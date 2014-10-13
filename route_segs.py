@@ -325,6 +325,10 @@ def get_full_stop_pattern_segs(all_pattern_segs, seg_links,
     full_stop_pattern_segs = []
     all_seg_ids = map(operator.attrgetter('seg_id'), all_pattern_segs) 
 
+    if len(all_pattern_segs) == 1:
+        full_stop_pattern_segs = list(all_pattern_segs)
+        return full_stop_pattern_segs
+
     if force_first_stop_id is None:
         # Ok: start with a search for one of the segments that 
         # only has one link - and is therefore an end of the route.
@@ -433,6 +437,10 @@ def get_longest_seg_linked_chain(init_seg_id, all_segs, segs_visited_so_far,
     prev_seg_id = prev_seg_ref.seg_id
     stop_ids_in_route_so_far = get_set_of_stops_in_route_so_far(
         segs_visited_so_far) 
+
+    # Special case for having visited all segments - esp for 1-segment routes
+    if len(all_segs) == len(segs_visited_so_far):
+        return [], 0
 
     curr_seg_id = init_seg_id
     while True:
