@@ -32,8 +32,11 @@ def get_route_names_sorted(route_names):
 # manipulation of them.
 
 class Route_Def:
-    def __init__(self, name, dir_names, ordered_seg_ids):
-        self.name = name
+    def __init__(self, route_id, short_name, long_name, dir_names,
+            ordered_seg_ids):
+        self.id = route_id
+        self.short_name = short_name
+        self.long_name = long_name
         self.dir_names = dir_names
         self.ordered_seg_ids = ordered_seg_ids
   
@@ -644,8 +647,17 @@ def create_ordered_seg_refs_from_ids(ordered_seg_ids, segs_lookup_table):
 ###############################
 # I/O from route definition CSV
 
+# Old (Pre 15 Oct 2014) headers of route_defs.csv
+# ['Route', 'dir1', 'dir2', 'Segments'])
+
+# New headers:
+# ['route_id', 'route_short_name', 'route_long_name',
+#    'dir1', 'dir2', 'Segments'])
+
 def get_route_num(route_def):
-    rname = route_def.name
+    rname = route_def.short_name
+    if rname == None:
+        rname = route_def.long_name
     # Courtesy http://stackoverflow.com/questions/4289331/python-extract-numbers-from-a-string
     try:
         rnum = int(re.findall(r'\d+', rname)[0])
@@ -667,16 +679,38 @@ def read_route_defs(csv_file_name, do_sort=True):
         print "Error, route mapping CSV file given, %s , failed to open." \
             % (csv_file_name)
         sys.exit(1) 
+
     reader = csv.reader(csv_file, delimiter=';', quotechar="'") 
     # skip headings
-    reader.next()
+    headers = reader.next()
+    # Deal with old and new formats
+    if headers[0] == 'Route':
+        format_version = "00"
+    else:
+        format_version = "01"
     for ii, row in enumerate(reader):
-        rname = row[0]
-        dir1 = row[1]
-        dir2 = row[2]
-        segments_str = row[3].split(',')
+        if format_version == "00":
+            r_id = ii
+            r_short_name = row[0]
+            r_long_name = None
+            dir1 = row[1]
+            dir2 = row[2]
+            segments_str = row[3].split(',')
+        else:
+            r_id = row[0]
+            r_short_name = row[1]
+            if r_short_name == 'None':
+                r_short_name = None
+            r_long_name = row[2]
+            if r_long_name == 'None':
+                r_long_name = None
+            assert r_short_name or r_long_name
+            dir1 = row[3]
+            dir2 = row[4]
+            segments_str = row[5].split(',')
         seg_ids = [int(segstr) for segstr in segments_str]
-        route_def = Route_Def(rname, (dir1, dir2), seg_ids)
+        route_def = Route_Def(r_id, r_short_name, r_long_name,
+            (dir1, dir2), seg_ids)
         route_defs.append(route_def)
     if do_sort == True:
         route_defs.sort(key=get_route_num)        
@@ -686,12 +720,23 @@ def read_route_defs(csv_file_name, do_sort=True):
 def write_route_defs(csv_file_name, route_defs):
     routesfile = open(csv_file_name, 'w')
     rwriter = csv.writer(routesfile, delimiter=';')
-    rwriter.writerow(['Route', 'dir1', 'dir2', 'Segments'])
+    rwriter.writerow(['route_id', 'route_short_name', 'route_long_name',
+        'dir1', 'dir2', 'Segments'])
 
     for rdef in route_defs:
-        dirs = rdef.dir_names
+        dirs = tuple(rdef.dir_names)
+        if not dirs:
+            print "Warning:- no dirs listed for route %s to write. "\
+                "writing as empty dirs." % rdef.short_name
+            dirs = ("", "")
+        if len(dirs) == 1:    
+            print "Warning:- only one dir listed for route %s to write. "\
+                "writing other dir as empty." % rdef.short_name
+            dirs = (dirs[0], "")
+            
         seg_str_all = ','.join(map(str, rdef.ordered_seg_ids))
-        rwriter.writerow([rdef.name, dirs[0], dirs[1], seg_str_all])
+        rwriter.writerow([rdef.id, rdef.short_name, rdef.long_name,
+            dirs[0], dirs[1], seg_str_all])
 
     routesfile.close()
     print "Wrote output to %s" % (csv_file_name)

@@ -29,11 +29,13 @@ def process_all_routes_from_segments(segments_shp_fname, output_fname):
         all_segs_by_route, rnames_sorted)
 
     route_defs = []
-    for rname in rnames_sorted:
-        rdef = route_segs.Route_Def(rname, route_dirs[rname],
+    for r_ii, rname in enumerate(rnames_sorted):
+        # Haven't yet implemented ability to create route long names
+        r_long_name = None
+        rdef = route_segs.Route_Def(r_ii, rname, r_long_name,
+            route_dirs[rname],
             map(operator.attrgetter('seg_id'), route_segs_ordered[rname]))
         route_defs.append(rdef)
-
     route_segs.write_route_defs(output_fname, route_defs)
 
     shapefile.Destroy()

@@ -117,6 +117,20 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id,
         route_dirs = (last_stop_name, first_stop_name)
     return full_stop_pattern_segs, route_dirs
 
+def get_gtfs_route_ids_in_output_order(routes_dict):
+    gtfs_route_id_output_order = []
+    temp_route_defs = []
+    for route in routes_dict.itervalues():
+        # Create a temp route_def
+        route_def = route_segs.Route_Def(route.route_id,
+            route.route_short_name,
+            route.route_long_name, ["", ""], [])
+        temp_route_defs.append(route_def)
+    temp_route_defs.sort(key=route_segs.get_route_num)
+    gtfs_route_id_output_order = map(operator.attrgetter('id'), 
+        temp_route_defs)
+    return gtfs_route_id_output_order
+
 def add_route_segments_from_gtfs(schedule, segments_lyr,
         stops_lyr, gtfs_stop_id_to_stop_id_map, mode_config,
         line_start_stop_info = None):
@@ -153,8 +167,14 @@ def add_route_segments_from_gtfs(schedule, segments_lyr,
                 continue
             first_stop_id = gtfs_stop_id_to_stop_id_map[gtfs_stop_id]
             force_start_stop_ids_by_gtfs_route_id[r_id] = first_stop_id
+
+    # Work out a nice processing order.
+    gtfs_route_ids_output_order = get_gtfs_route_ids_in_output_order(
+        schedule.routes)
+
     # Calculate the segments in the full-stop version of each route.
-    for gtfs_route_id, gtfs_route in schedule.routes.iteritems():
+    for gtfs_route_id in gtfs_route_ids_output_order:
+        gtfs_route = schedule.routes[gtfs_route_id]
         force_first_stop_id = None
         if force_start_stop_ids_by_gtfs_route_id:
             try:
@@ -171,20 +191,17 @@ def add_route_segments_from_gtfs(schedule, segments_lyr,
     # We don't add the segments to GIS persistence until all routes are 
     #  processed, to capture possible commonality between routes
     #  (and thus the final list of segments will be smaller).
-    
     segs_all_routes = []
-    for gtfs_route_id, gtfs_route in schedule.routes.iteritems():
-        rname = gtfs_route.route_short_name
-        if not rname:
-            rname = gtfs_route.route_long_name
-        # OGR doesn't like writing unicode Python, so stringify here.
-        rname = str(rname)
+    for r_id, gtfs_route_id in enumerate(gtfs_route_ids_output_order):
+        gtfs_route = schedule.routes[gtfs_route_id]
+        r_short_name = str(gtfs_route.route_short_name)
+        r_long_name = str(gtfs_route.route_long_name)
         updated_segs_this_route = []
         for seg in route_segments_initial[gtfs_route_id]:
             route_segs.add_update_seg_ref(seg.first_id, seg.second_id,
-                rname, seg.route_dist_on_seg, segs_all_routes,
+                r_short_name, seg.route_dist_on_seg, segs_all_routes,
                 updated_segs_this_route)
-        route_def = route_segs.Route_Def(rname, 
+        route_def = route_segs.Route_Def(r_id, r_short_name, r_long_name, 
             all_route_dirs[gtfs_route_id],
             map(operator.attrgetter('seg_id'), updated_segs_this_route))
         route_defs.append(route_def)
