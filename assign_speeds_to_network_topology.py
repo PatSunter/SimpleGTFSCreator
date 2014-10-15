@@ -205,8 +205,9 @@ if __name__ == "__main__":
         sys.exit(1)    
 
     #assign_free_speeds_constant(route_segments_shp, mode_config)
-    #assign_peak_speeds_bus_melb_distance_based(route_segments_shp, mode_config)
     #assign_peak_speeds_constant(route_segments_shp, mode_config)
+
+    #assign_peak_speeds_bus_melb_distance_based(route_segments_shp, mode_config)
 
     # These two functions require you've first update the motorway status ...
     assign_free_speeds_constant_motorway_check(route_segments_shp, mode_config)

@@ -41,7 +41,7 @@ def add_all_stops_from_gtfs(schedule, stops_lyr, stops_multipoint):
     print "...done adding the %d stops." % stop_count
     return gtfs_stop_id_to_stop_id_map
 
-def calc_seg_refs_for_route(schedule, gtfs_route_id,
+def calc_seg_refs_for_route(schedule, gtfs_route_id, r_id,
         gtfs_stop_id_to_stop_id_map, seg_distances, route_first_stop_id = None):
     """Calculate all the segments for a full-stop version of the route with
     specified GTFS ID."""
@@ -52,7 +52,6 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id,
     rname = gtfs_route.route_short_name
     if not rname:
         rname = gtfs_route.route_long_name
-    str(rname)
     trip_dict = gtfs_route.GetPatternIdTripDict()
     p_keys = trip_dict.keys()
 
@@ -87,7 +86,7 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id,
             rdist_on_seg = gtfs_ops.get_update_seg_dist_m(seg_distances,
                 stop_pair)
             route_segs.add_update_seg_ref(first_stop_id, second_stop_id,
-                rname, rdist_on_seg, all_pattern_segments,
+                r_id, rdist_on_seg, all_pattern_segments,
                 [])
             
     # (Now all segment pairs for the route are assembled:-)
@@ -126,7 +125,7 @@ def get_gtfs_route_ids_in_output_order(routes_dict):
             route.route_short_name,
             route.route_long_name, ["", ""], [])
         temp_route_defs.append(route_def)
-    temp_route_defs.sort(key=route_segs.get_route_num)
+    temp_route_defs.sort(key=route_segs.get_route_order_key_from_name)
     gtfs_route_id_output_order = map(operator.attrgetter('id'), 
         temp_route_defs)
     return gtfs_route_id_output_order
@@ -172,8 +171,14 @@ def add_route_segments_from_gtfs(schedule, segments_lyr,
     gtfs_route_ids_output_order = get_gtfs_route_ids_in_output_order(
         schedule.routes)
 
+    # Set up a canonical mapping from gtfs route ID to OSSTIP route ID.
+    gtfs_route_ids_to_route_ids_map = {}
+    for r_id, gtfs_r_id in enumerate(gtfs_route_ids_output_order):
+        gtfs_route_ids_to_route_ids_map[gtfs_r_id] = r_id
+
     # Calculate the segments in the full-stop version of each route.
     for gtfs_route_id in gtfs_route_ids_output_order:
+        r_id = gtfs_route_ids_to_route_ids_map[gtfs_route_id]
         gtfs_route = schedule.routes[gtfs_route_id]
         force_first_stop_id = None
         if force_start_stop_ids_by_gtfs_route_id:
@@ -183,7 +188,7 @@ def add_route_segments_from_gtfs(schedule, segments_lyr,
             except KeyError:
                 force_first_stop_id = None
         route_seg_refs, route_dirs = calc_seg_refs_for_route(schedule, 
-            gtfs_route_id, gtfs_stop_id_to_stop_id_map, seg_distances,
+            gtfs_route_id, r_id, gtfs_stop_id_to_stop_id_map, seg_distances,
             force_first_stop_id)
         route_segments_initial[gtfs_route_id] = route_seg_refs
         all_route_dirs[gtfs_route_id] = route_dirs
@@ -192,14 +197,15 @@ def add_route_segments_from_gtfs(schedule, segments_lyr,
     #  processed, to capture possible commonality between routes
     #  (and thus the final list of segments will be smaller).
     segs_all_routes = []
-    for r_id, gtfs_route_id in enumerate(gtfs_route_ids_output_order):
+    for gtfs_route_id in gtfs_route_ids_output_order:
+        r_id = gtfs_route_ids_to_route_ids_map[gtfs_route_id]
         gtfs_route = schedule.routes[gtfs_route_id]
         r_short_name = str(gtfs_route.route_short_name)
         r_long_name = str(gtfs_route.route_long_name)
         updated_segs_this_route = []
         for seg in route_segments_initial[gtfs_route_id]:
             route_segs.add_update_seg_ref(seg.first_id, seg.second_id,
-                r_short_name, seg.route_dist_on_seg, segs_all_routes,
+                r_id, seg.route_dist_on_seg, segs_all_routes,
                 updated_segs_this_route)
         route_def = route_segs.Route_Def(r_id, r_short_name, r_long_name, 
             all_route_dirs[gtfs_route_id],

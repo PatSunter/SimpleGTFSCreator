@@ -76,7 +76,8 @@ def create_gtfs_route_entries(route_defs, mode_config, schedule):
     print "%s() called." % inspect.stack()[0][3]
     route_id_to_gtfs_route_id_map = {}
     # Routes
-    sorted_route_defs = sorted(route_defs, key=route_segs.get_route_num)
+    sorted_route_defs = sorted(route_defs,
+        key=route_segs.get_route_order_key_from_name)
     for ii, route_def in enumerate(sorted_route_defs):
         route_long_name = route_def.long_name
         route_short_name = route_def.short_name
@@ -187,7 +188,8 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
         trip_ctr = len(schedule.trips)
     # Do routes and directions as outer loops rather than service periods - as 
     # allows maximal pre-calculation
-    sorted_route_defs = sorted(route_defs, key=route_segs.get_route_num)
+    sorted_route_defs = sorted(route_defs,
+        key=route_segs.get_route_order_key_from_name)
     for ii, route_def in enumerate(sorted_route_defs):
         print "Adding trips and stops for route '%s: %s'" \
             % (route_def.short_name, route_def.long_name)
@@ -300,8 +302,8 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id,
     stops_lyr = stops_shp.GetLayer(0)
     # Apply a filter to speed up calculations - only segments on this route.
     where_clause = "%s LIKE '%%%s' OR %s LIKE '%%%s,%%'" % \
-        (tp_model.SEG_ROUTE_LIST_FIELD, route_def.short_name,\
-        tp_model.SEG_ROUTE_LIST_FIELD, route_def.short_name)
+        (tp_model.SEG_ROUTE_LIST_FIELD, route_def.id,\
+        tp_model.SEG_ROUTE_LIST_FIELD, route_def.id)
     route_segments_lyr.SetAttributeFilter(where_clause)
     segs_lookup_table = tp_model.build_segs_lookup_table(route_segments_lyr)
 

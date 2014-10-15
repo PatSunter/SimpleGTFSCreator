@@ -74,7 +74,10 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
 
     print "Building route segment ref. infos:"
     for ii, route in enumerate(input_routes_lyr):
-        rname = route.GetField(0)
+        rname = route.GetField(tp_model.ROUTE_NAME_FIELD)
+        # TODO: probably should enforce and use an ID field in route shp file,
+        #  rather than use this function.
+        r_id = tp_model.route_id_from_name(rname)
         #if rname != "R71": continue
         start_cnt = len(all_seg_refs)
         new_segs_cnt = 0
@@ -223,7 +226,7 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
                     #         dist_to_next+skipped_dist)
                     #This function will also handle updating the seg_ref lists
                     seg_ref, new_status = route_segs.add_update_seg_ref(
-                        last_stop_id, next_stop_id, rname,
+                        last_stop_id, next_stop_id, r_id,
                         dist_to_next+skipped_dist, all_seg_refs,
                         seg_refs_this_route)
                     if new_status:
@@ -248,7 +251,7 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
                     " current loc (may not be source of problems) is %s." %\
                     (len(seg_refs_this_route), current_loc)
                 sys.exit(1)
-        route_seg_refs.append((rname,seg_refs_this_route))
+        route_seg_refs.append((r_id,seg_refs_this_route))
         end_cnt = len(all_seg_refs)
         assert (end_cnt - start_cnt) == new_segs_cnt
         print "..Added %d seg refs for this route (%d of which were new)." % \

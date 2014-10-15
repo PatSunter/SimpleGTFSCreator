@@ -20,7 +20,12 @@ import lineargeom
 ON_POINT_CHECK_DIST = 0.01
 
 def get_route_num_from_feature(route):
-    return int(route.GetField(tp_model.ROUTE_NAME_FIELD)[1:])
+    rname = route.GetField(tp_model.ROUTE_NAME_FIELD)
+    if rname[0] == 'R' and len(rname) <= 4:
+        r_key = int(rname[1:])
+    else:    
+        r_key = rname
+    return r_key
 
 def calc_distance(route, stops):
     """Calculate the linear distance along a route, between two stops."""
@@ -140,8 +145,6 @@ def get_route(route_lyr, route_num):
         if route.GetField(tp_model.ROUTE_NAME_FIELD) == route_num:
             found_route = route
             break
-    assert found_route is not None
-    route = found_route
     route_lyr.ResetReading()
     return found_route
 
@@ -245,6 +248,7 @@ def testing():
     stop_ids = [585, 605]
 
     route = get_route(route_lyr, route_num)
+    assert route is not None
     #stops = get_stops(stops_lyr, stop_ids)
     assert None not in stops
     #print "Calculating length for route %s, stop ids %d and %d" % \
@@ -319,6 +323,7 @@ if __name__ == "__main__":
 
     if route_num_choice is not None:
         route = get_route(routes_lyr, route_num_choice)
+        assert route is not None
         calc_all_route_segment_lengths(route, segments_lyr, stops_lyr,
             update=update_choice)
     else:    

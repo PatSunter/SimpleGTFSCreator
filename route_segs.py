@@ -14,6 +14,18 @@ import topology_shapefile_data_model as tp_model
 ########
 # Basic route name handling
 
+def get_route_order_key_from_name(route_def):
+    rname = route_def.short_name
+    if rname:
+        # Courtesy http://stackoverflow.com/questions/4289331/python-extract-numbers-from-a-string
+        try:
+            order_key = int(re.findall(r'\d+', rname)[0])
+        except IndexError:
+            order_key = rname
+    else:
+        order_key = route_def.long_name
+    return order_key
+
 def get_route_names_sorted(route_names):
     # Get an ordered list of route names so we can write in name order,
     keyfunc = None
@@ -58,9 +70,20 @@ class Seg_Reference:
             self.routes = routes
         self.seg_ii = None    # Index into segments layer shapefile -
     
-def add_route_to_seg_ref(seg_ref, route_name):
-    if route_name not in seg_ref.routes:
-        seg_ref.routes.append(route_name)
+def get_print_name(route_def):
+    print_name = ""
+    if route_def.short_name and route_def.short_name != "None":
+        print_name = route_def.short_name
+    if route_def.long_name and route_def.long_name != "None":
+        if not print_name:
+            print_name = route_def.long_name
+        else:
+            print_name += " (%s)" % route_def.long_name 
+    return print_name
+
+def add_route_to_seg_ref(seg_ref, route_id):
+    if route_id not in seg_ref.routes:
+        seg_ref.routes.append(route_id)
     return    
 
 def seg_has_stops(seg_ref, stop_id_1, stop_id_2):
@@ -104,7 +127,7 @@ def find_seg_ref_matching_stops(all_seg_refs, stop_id_1, stop_id_2):
             break
     return matched_seg_ref
             
-def add_update_seg_ref(start_stop_id, end_stop_id, route_name,
+def add_update_seg_ref(start_stop_id, end_stop_id, route_id,
         route_dist_on_seg, all_seg_refs, seg_refs_this_route,
         possible_route_duplicates=False):
     """Add a new segment to the two pre-existing lists all_seg_refs, and 
@@ -120,8 +143,8 @@ def add_update_seg_ref(start_stop_id, end_stop_id, route_name,
         #    "routes = %s, new route = '%s'" %\
         #    (matched_seg_ref.seg_id\
         #    matched_seg_ref.routes,\
-        #    route_name)
-        add_route_to_seg_ref(matched_seg_ref, route_name)
+        #    route_id)
+        add_route_to_seg_ref(matched_seg_ref, route_id)
         seg_ref_to_return = matched_seg_ref
         if possible_route_duplicates:
             # Adding a new defensive case:- don't want to add a segment twice to
@@ -137,7 +160,7 @@ def add_update_seg_ref(start_stop_id, end_stop_id, route_name,
         # +1 since we want to start counter at 1
         seg_id = len(all_seg_refs)+1
         new_seg_ref = Seg_Reference(seg_id, start_stop_id, end_stop_id,
-            route_dist_on_seg, routes = [route_name])
+            route_dist_on_seg, routes = [route_id])
         # Its a new segment, so append to the list of all segments.
         all_seg_refs.append(new_seg_ref)
         seg_ref_to_return = new_seg_ref
@@ -543,45 +566,49 @@ def get_longest_seg_linked_chain(init_seg_id, all_segs, segs_visited_so_far,
         len(stop_ids_in_route_thus_far)
     return seg_chain, len(seg_chain)
 
-def order_all_route_segments(all_segs_by_route, rnames_sorted=None):
+def order_all_route_segments(all_segs_by_route, mode_config, r_ids_sorted=None):
     # Now order each route properly ...
     # for each route - find unique stop names 
-    if rnames_sorted == None:
-        rnames_sorted = get_route_names_sorted(all_segs_by_route.keys())
-    routes_ordered = {}
+    if r_ids_sorted == None:
+        r_ids_sorted = sorted(all_segs_by_route.keys())
+    segs_by_routes_ordered = {}
     route_dirs = {}
-    for rname in rnames_sorted:
-        print "Ordering segments by traversal for route '%s'" % rname
-        route_seg_refs = all_segs_by_route[rname]
+    for r_id in r_ids_sorted:
+        rname = tp_model.route_name_from_id(r_id)
+        print "Ordering segments by traversal for route %d: '%s'" \
+            % (r_id, rname)
+        route_seg_refs = all_segs_by_route[r_id]
         if len(route_seg_refs) == 1:
-            segs_by_route_ordered[rname] = route_seg_refs
-            startstop = route_seg_refs[0].first_id
-            endstop = route_seg_refs[0].second_id
+            segs_by_routes_ordered[r_id] = route_seg_refs
+            start_stop = route_seg_refs[0].first_id
+            end_stop = route_seg_refs[0].second_id
         else:
             seg_links = build_seg_links(route_seg_refs)
             ordered_seg_refs = order_segs_based_on_links(route_seg_refs,
                 seg_links)
-            segs_by_route_ordered[rname] = ordered_seg_refs
+            segs_by_routes_ordered[r_id] = ordered_seg_refs
             # Now create the directions
             first_seg, second_seg = ordered_seg_refs[0], ordered_seg_refs[1]
             linkstop = find_linking_stop_id(first_seg, second_seg)
             if first_seg.first_id != linkstop:
-                startstop = first_seg.first_id
+                start_stop = first_seg.first_id
             else:
-                startstop = first_seg.second_id
+                start_stop = first_seg.second_id
             last_seg = ordered_seg_refs[-1]
             second_last_seg = ordered_seg_refs[-2]
             linkstop = find_linking_stop_id(last_seg, second_last_seg)
             if last_seg.first_id != linkstop:
-                endstop = last_seg.first_id
+                end_stop = last_seg.first_id
             else:
-                endstop = last_seg.second_id
-        dir1 = "%s->%s" % (startstop, endstop)
-        dir2 = "%s->%s" % (endstop, startstop)
-        route_dirs[rname] = (dir1, dir2)
-    assert len(segs_by_route_ordered) == len(all_segs_by_route)
-    assert len(segs_by_route_ordered) == len(route_dirs)
-    return segs_by_route_ordered, route_dirs
+                end_stop = last_seg.second_id
+        dir1 = "%s->%s" % (tp_model.stop_name_from_id(start_stop, mode_config), \
+            tp_model.stop_name_from_id(end_stop, mode_config))
+        dir2 = "%s->%s" % (tp_model.stop_name_from_id(end_stop, mode_config), \
+            tp_model.stop_name_from_id(start_stop, mode_config))
+        route_dirs[r_id] = (dir1, dir2)
+    assert len(segs_by_routes_ordered) == len(all_segs_by_route)
+    assert len(segs_by_routes_ordered) == len(route_dirs)
+    return segs_by_routes_ordered, route_dirs
 
 def extract_stop_list_along_route(seg_refs):
     stop_ids = []
@@ -626,13 +653,13 @@ def get_routes_and_segments(segs_lyr):
     all_routes = {}
     for feature in segs_lyr:
         seg_ref = seg_ref_from_feature(feature)
-        for route in seg_ref.routes:
-            if route not in all_routes:
-                all_routes[route] = [seg_ref]
+        for route_id in seg_ref.routes:
+            if route_id not in all_routes:
+                all_routes[route_id] = [seg_ref]
             else:
-                all_routes[route].append(seg_ref)
-    #for rname, rsegs in all_routes.iteritems():
-    #    print "For Route '%s': segments are %s" % (rname, rsegs)    
+                all_routes[route_id].append(seg_ref)
+    #for r_id, rsegs in all_routes.iteritems():
+    #    print "For Route ID '%s': segments are %s" % (r_id, rsegs)    
     segs_lyr.ResetReading()
     return all_routes
 
@@ -653,18 +680,6 @@ def create_ordered_seg_refs_from_ids(ordered_seg_ids, segs_lookup_table):
 # New headers:
 # ['route_id', 'route_short_name', 'route_long_name',
 #    'dir1', 'dir2', 'Segments'])
-
-def get_route_num(route_def):
-    rname = route_def.short_name
-    if rname == None:
-        rname = route_def.long_name
-    # Courtesy http://stackoverflow.com/questions/4289331/python-extract-numbers-from-a-string
-    try:
-        rnum = int(re.findall(r'\d+', rname)[0])
-    except IndexError:
-        # Fallback to just using entire route name.
-        rnum = rname
-    return rnum
 
 def read_route_defs(csv_file_name, do_sort=True):
     """Reads a CSV of route_defs, into a list of 'route_defs'.
@@ -699,10 +714,10 @@ def read_route_defs(csv_file_name, do_sort=True):
         else:
             r_id = row[0]
             r_short_name = row[1]
-            if r_short_name == 'None':
+            if r_short_name == 'None' or len(r_short_name) == 0:
                 r_short_name = None
             r_long_name = row[2]
-            if r_long_name == 'None':
+            if r_long_name == 'None' or len(r_long_name) == 0:
                 r_long_name = None
             assert r_short_name or r_long_name
             dir1 = row[3]
@@ -713,7 +728,7 @@ def read_route_defs(csv_file_name, do_sort=True):
             (dir1, dir2), seg_ids)
         route_defs.append(route_def)
     if do_sort == True:
-        route_defs.sort(key=get_route_num)        
+        route_defs.sort(key=get_route_order_key_from_name)        
     csv_file.close()
     return route_defs
 

@@ -136,7 +136,7 @@ def get_distance_km(seg_feature):
 
 def get_routes_on_seg(seg_feature):
     seg_routes = seg_feature.GetField(SEG_ROUTE_LIST_FIELD)
-    rlist = seg_routes.split(',')
+    rlist = map(int, seg_routes.split(','))
     assert len(rlist) > 0
     return rlist
 
@@ -299,6 +299,17 @@ def add_route_to_seg(segments_lyr, seg_feat, route_name):
 def stop_name_from_id(stop_id, mode_config):
     return "%s%d" % (mode_config['stop_prefix'], stop_id)
 
+def route_name_from_id(route_id):
+    return "R%03d" % route_id
+
+# NOTE : this is a specific simple data model for early simple GTFS creator
+# work. Probably should generalise and just record an ID for each route in
+# the actual shapefile/database.
+def route_id_from_name(route_name):
+    assert route_name[0] == 'R'
+    r_id = int(route_name[1:])
+    return r_id
+
 def get_stop_ids_of_seg(seg_feature):
     pt_a_name = seg_feature.GetField(SEG_STOP_1_NAME_FIELD)
     pt_b_name = seg_feature.GetField(SEG_STOP_2_NAME_FIELD)
@@ -324,7 +335,7 @@ def add_seg_ref_as_feature(segs_lyr, seg_ref, seg_geom, mode_config):
     seg_geom2.Transform(transform)
     seg_feat.SetGeometry(seg_geom2)
     seg_feat.SetField(SEG_ID_FIELD, seg_ref.seg_id)
-    seg_feat.SetField(SEG_ROUTE_LIST_FIELD, ",".join(seg_ref.routes))
+    seg_feat.SetField(SEG_ROUTE_LIST_FIELD, ",".join(map(str, seg_ref.routes)))
     seg_feat.SetField(SEG_STOP_1_NAME_FIELD,
         stop_name_from_id(seg_ref.first_id, mode_config))
     seg_feat.SetField(SEG_STOP_2_NAME_FIELD,
