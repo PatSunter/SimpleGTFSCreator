@@ -189,14 +189,14 @@ def route_defs_match_statuses(route_def, route_def2):
 def route_def_matches_gtfs_route(route_def, gtfs_route):
     match_statuses = []
     if route_def.id is not None:
-        if route_def.id == gtfs_route.route_id:
-            match_statuses.append(True)
+        test = route_def.id == gtfs_route.route_id
+        match_statuses.append(test)
     if route_def.short_name:
-        if route_def.short_name == gtfs_route.route_short_name:
-            match_statuses.append(True)
+        test = route_def.short_name == gtfs_route.route_short_name
+        match_statuses.append(test)
     if route_def.long_name:    
-        if route_def.long_name == gtfs_route.route_long_name:
-            match_statuses.append(True)
+        test = route_def.long_name == gtfs_route.route_long_name
+        match_statuses.append(test)
     match_status = False
     # Make sure there is at least one attribute matching, and all match.
     if len(match_statuses) >= 1 and False not in match_statuses:
