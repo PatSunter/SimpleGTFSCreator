@@ -8,6 +8,7 @@ import sys
 import csv
 import re
 import operator
+import itertools
 
 import topology_shapefile_data_model as tp_model
 
@@ -167,6 +168,78 @@ def add_update_seg_ref(start_stop_id, end_stop_id, route_id,
         seg_refs_this_route.append(seg_ref_to_return)
 
     return seg_ref_to_return, new_status
+
+def route_defs_match_statuses(route_def, route_def2):
+    match_statuses = []
+    if route_def.id is not None and route_def2.id is not None:
+        test = route_def.id == route_def2.id
+        match_statuses.append(test)
+    if route_def.short_name and route_def2.short_name:
+        test = route_def.short_name == route_def2.short_name
+        match_statuses.append(test)
+    if route_def.long_name and route_def2.long_name:
+        test = route_def.long_name == route_def2.long_name
+        match_statuses.append(test)
+    match_status = False
+    # Make sure there is at least one attribute matching, and all match.
+    if len(match_statuses) >= 1 and False not in match_statuses:
+        match_status = True
+    return match_status
+
+def route_def_matches_gtfs_route(route_def, gtfs_route):
+    match_statuses = []
+    if route_def.id is not None:
+        if route_def.id == gtfs_route.route_id:
+            match_statuses.append(True)
+    if route_def.short_name:
+        if route_def.short_name == gtfs_route.route_short_name:
+            match_statuses.append(True)
+    if route_def.long_name:    
+        if route_def.long_name == gtfs_route.route_long_name:
+            match_statuses.append(True)
+    match_status = False
+    # Make sure there is at least one attribute matching, and all match.
+    if len(match_statuses) >= 1 and False not in match_statuses:
+        match_status = True
+    return match_status
+
+def get_gtfs_route_ids_matching_route_defs(route_defs_to_match, gtfs_routes):
+    route_defs_to_check_match = zip(route_defs_to_match,
+        itertools.count(0))
+    matching_gtfs_ids = []
+    route_defs_match_status = [False] * len(route_defs_to_match)
+    all_matched = False
+    for gtfs_route in gtfs_routes:
+        matches = False
+        # Note we take a copy of list here since we want to remove from it.
+        for route_def, r_index in route_defs_to_check_match[:]:
+            if route_def_matches_gtfs_route(route_def, gtfs_route):
+                route_defs_match_status[r_index] = True
+                gtfs_route_id = gtfs_route.route_id
+                if gtfs_route_id not in matching_gtfs_ids:
+                    matching_gtfs_ids.append(gtfs_route_id)
+                else:
+                    print "Warning: route def just matched, with ID "\
+                        "%s, name %s, already matched a GTFS route. "\
+                        "Ignoring 2nd match." \
+                        % (gtfs_route_id, get_print_name(route_def))
+                if route_def.id == gtfs_route_id:
+                    # Only remove the route_def in this case, since we matched
+                    # on ID. Otherwise there may be more matches.
+                    route_defs_to_check_match.remove((route_def,r_index))
+                    if len(route_defs_to_check_match) == 0:
+                        all_matched = True
+                        break
+        if all_matched:
+            # All routes matched, we're done.
+            break
+    for r_index, match_status in enumerate(route_defs_match_status):
+        if not match_status:
+            unmatched_r_def = route_defs_to_match[r_index]
+            print "Warning: route given by ID %s, name %s, didn't match "\
+                "any GTFS routes in given selection." \
+                % (unmatched_r_def.id, get_print_name(unmatched_r_def))
+    return matching_gtfs_ids, route_defs_match_status
 
 #########
 ### Functions to do with querying network topology

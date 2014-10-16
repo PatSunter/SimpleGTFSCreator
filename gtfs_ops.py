@@ -100,6 +100,17 @@ def printTripInfoForStops(stop_ids):
 
 # General Access helper functions
 
+def get_route_print_name(gtfs_route):
+    print_name = ""
+    if gtfs_route.route_short_name and gtfs_route.route_short_name != "None":
+        print_name = gtfs_route.route_short_name
+    if gtfs_route.route_long_name and gtfs_route.route_long_name != "None":
+        if not print_name:
+            print_name = gtfs_route.route_long_name
+        else:
+            print_name += " (%s)" % gtfs_route.route_long_name 
+    return print_name
+
 def getRouteByShortName(schedule, short_name):
     for r_id, route in schedule.routes.iteritems():
         if route.route_short_name == short_name:
@@ -121,54 +132,33 @@ def getStopWithName(schedule, stop_name):
 # Tools for manipulating a schedule, and/or adding to a new schedule.
 
 def copy_selected_routes(input_schedule, output_schedule,
-        route_short_names, route_long_names):
-
+        gtfs_routes_to_copy_ids):
     routes_to_copy = []
-    for route_name in route_short_names:
-        r_id, route = getRouteByShortName(input_schedule, route_name)
-        if r_id is None:
-            print "Warning:- route with short name '%s' requested to copy not "\
-                "found, skipping." % (route_name)
-            route_name
-        else:
-            if r_id in [r[0] for r in routes_to_copy]:
-                print "Warning:- you already asked to copy route with "\
-                    "short name '%s' (ID '%d')." % route_name
-            else:
-                routes_to_copy.append((route_name, r_id, route))
-    
-    for route_name in route_long_names:
-        r_id, route = getRouteByLongName(input_schedule, route_name)
-        if r_id is None:
-            print "Warning:- route with long name '%s' requested to copy not "\
-                "found, skipping." % (route_name)
-            route_name
-        else:
-            if r_id in [r[0] for r in routes_to_copy]:
-                print "Warning:- you already asked to copy route with "\
-                    "long name '%s' (ID '%d')." % route_name
-            else:
-                routes_to_copy.append((route_name, r_id, route))
-    
-    for route_name, r_id, route in routes_to_copy:
-        print "Now creating entry for route '%s'" % route_name
-        assert r_id is not None and route is not None
-        route_cpy = copy.copy(route)
+    for id_i, gtfs_route_id in enumerate(gtfs_routes_to_copy_ids):
+        if len(gtfs_routes_to_copy_ids) > 1 and \
+                gtfs_route_id in gtfs_routes_to_copy_ids[id_i+1:]:
+            print "Warning:- route with id %d requested to copy is "\
+                "contained multiple times in list to copy: skipping."\
+                "this instance." % (gtfs_route_id)
+            continue    
+        try:
+            gtfs_route = input_schedule.routes[gtfs_route_id]
+        except KeyError:    
+            print "Warning:- route with id %d requested to copy not "\
+                "found, skipping." % (gtfs_route_id)
+            continue
+        route_name = get_route_print_name(gtfs_route)
+        print "Now creating entry for route id %s, name '%s'" \
+            % (gtfs_route_id, route_name)
+        route_cpy = copy.copy(gtfs_route)
         route_cpy._schedule = None
         route_cpy._trips = []
         output_schedule.AddRouteObject(route_cpy)
 
-        trip_dict = route.GetPatternIdTripDict()
-        p_keys = [k for k in trip_dict.iterkeys()]
-
+        trip_dict = gtfs_route.GetPatternIdTripDict()
         print "Copying across trips and stop times for %d patterns " \
             "in this route." % len(trip_dict)
-        for p_ii, p_key in enumerate(p_keys):
-            trips = trip_dict[p_key]
-            n_trips = len(trips)
-            trip_headsign = trips[0].trip_headsign
-            trip_pattern = trips[0].GetPattern()
-            n_stops = len(trip_pattern)
+        for trips in trip_dict.itervalues():
             for trip in trips:
                 stop_times = trip.GetStopTimes()
                 trip_cpy = copy.copy(trip)
