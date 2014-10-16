@@ -65,8 +65,8 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id, r_id,
     #assert len(route_dirs) == 2
     master_dir = route_dirs[0]
 
-    print "Calculating full-stop pattern of segments for route %s:" \
-        % rname
+    print 'Calculating full-stop pattern of segments for route id %s, "%s":' \
+        % (gtfs_route.route_id, gtfs_ops.get_route_print_name(gtfs_route))
     for p_ii, p_key in enumerate(p_keys):
         trips = trip_dict[p_keys[p_ii]]
         # According to the API, all of these trips in this trip pattern
