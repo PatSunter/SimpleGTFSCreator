@@ -102,18 +102,19 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id, r_id,
     for gtfs_stop_id, stop_id in gtfs_stop_id_to_stop_id_map.iteritems():
         stop_id_to_gtfs_stop_id_map[stop_id] = gtfs_stop_id
     if len(full_stop_pattern_segs) == 1:
-        route_dirs = (full_stop_pattern_segs[0].second_id, \
-            full_stop_pattern_segs[0].first_id)
+        first_stop_id = full_stop_pattern_segs[0].first_id
+        last_stop_id = full_stop_pattern_segs[0].second_id
     else:
         first_stop_id = route_segs.find_non_linking_stop_id(
             full_stop_pattern_segs[0], full_stop_pattern_segs[1])
         last_stop_id = route_segs.find_non_linking_stop_id(
             full_stop_pattern_segs[-1], full_stop_pattern_segs[-2])
-        first_stop_id_gtfs = stop_id_to_gtfs_stop_id_map[first_stop_id]
-        last_stop_id_gtfs = stop_id_to_gtfs_stop_id_map[last_stop_id]
-        first_stop_name = schedule.stops[first_stop_id_gtfs].stop_name
-        last_stop_name = schedule.stops[last_stop_id_gtfs].stop_name
-        route_dirs = (last_stop_name, first_stop_name)
+    first_stop_id_gtfs = stop_id_to_gtfs_stop_id_map[first_stop_id]
+    last_stop_id_gtfs = stop_id_to_gtfs_stop_id_map[last_stop_id]
+    first_stop_name = schedule.stops[first_stop_id_gtfs].stop_name
+    last_stop_name = schedule.stops[last_stop_id_gtfs].stop_name
+    route_dirs = (last_stop_name, first_stop_name)
+
     return full_stop_pattern_segs, route_dirs
 
 def get_gtfs_route_ids_in_output_order(routes_dict):
