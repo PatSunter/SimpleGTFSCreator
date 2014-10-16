@@ -309,17 +309,16 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id,
 
     ordered_seg_refs = route_segs.create_ordered_seg_refs_from_ids(
         route_def.ordered_seg_ids, segs_lookup_table)
-    # If direction ID is 1 - create a list in reverse stop id order.
-    # N.B. :- created this temporary list (not just iterator) since we now need
-    # to look ahead to check for 'matching' stops in segments.
+    stop_ids_along_route = route_segs.extract_stop_list_along_route(ordered_seg_refs)
+
+    # If direction ID is 1 - process segments and stops in reversed order.
     if dir_id == 0:
-        seg_refs = list(ordered_seg_refs)
+        seg_refs_in_dir = iter(ordered_seg_refs)
     else:
-        seg_refs = list(reversed(ordered_seg_refs))
+        seg_refs_in_dir = reversed(ordered_seg_refs)
+        stop_ids_along_route.reverse()
 
-    stop_ids_along_route = route_segs.extract_stop_list_along_route(seg_refs)
-
-    for seg_ctr, seg_ref in enumerate(seg_refs):
+    for seg_ctr, seg_ref in enumerate(seg_refs_in_dir):
         first_stop_id = stop_ids_along_route[seg_ctr]
         first_stop_id_gtfs = stop_id_to_gtfs_stop_id_map[first_stop_id]
         first_stop = schedule.GetStop(first_stop_id_gtfs)

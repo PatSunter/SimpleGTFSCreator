@@ -694,31 +694,24 @@ def order_all_route_segments(all_segs_by_route, mode_config, r_ids_sorted=None):
     assert len(segs_by_routes_ordered) == len(route_dirs)
     return segs_by_routes_ordered, route_dirs
 
-def extract_stop_list_along_route(seg_refs):
+def extract_stop_list_along_route(ordered_seg_refs):
     stop_ids = []
-    for seg_ctr, seg_ref in enumerate(seg_refs):
-        if seg_ctr == 0:
-            # special case for a route with only one segment.
-            if len(seg_refs) == 1:
-                if dir_id == 0:
-                    first_stop_id = seg_ref.first_id
-                    second_stop_id = seg_ref.second_id
-                else:    
-                    first_stop_id = seg_ref.second_id
-                    second_stop_id = seg_ref.first_id
-            else:        
-                next_seg_ref = seg_refs[seg_ctr+1]
-                first_stop_id, second_stop_id = get_stop_order(seg_ref,
-                    next_seg_ref)
-        else:
+    if len(ordered_seg_refs) == 1:
+        # special case for a route with only one segment.
+        seg_ref = ordered_seg_refs[0]
+        stop_ids = [seg_ref.first_id, seg_ref.second_id]
+    else:
+        first_stop_id, second_stop_id = get_stop_order(
+            ordered_seg_refs[0], ordered_seg_refs[1])
+        stop_ids.append(first_stop_id)
+        prev_second_stop_id = second_stop_id
+        for seg_ref in ordered_seg_refs[1:]:
             first_stop_id = prev_second_stop_id
             second_stop_id = get_other_stop_id(seg_ref, first_stop_id)
-
-        stop_ids.append(first_stop_id)
-        # Save this to help with calculations in subsequent steps
-        prev_second_stop_id = second_stop_id
-    # Finally, add second stop of final segment.
-    stop_ids.append(second_stop_id)
+            stop_ids.append(first_stop_id)
+            prev_second_stop_id = second_stop_id
+        # Finally, add second stop of final segment.
+        stop_ids.append(second_stop_id)
     return stop_ids
 
 ########################################
