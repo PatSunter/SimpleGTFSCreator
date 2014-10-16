@@ -534,8 +534,10 @@ def get_longest_seg_linked_chain(init_seg_id, all_segs, segs_visited_so_far,
     seg_chain = []
     prev_seg_ref = segs_visited_so_far[-1]
     prev_seg_id = prev_seg_ref.seg_id
+    init_seg_ref = get_seg_ref_with_id(init_seg_id, all_segs)
+    prev_stop_id = find_linking_stop_id(prev_seg_ref, init_seg_ref)
     stop_ids_in_route_so_far = get_set_of_stops_in_route_so_far(
-        segs_visited_so_far) 
+        segs_visited_so_far)
 
     # Special case for having visited all segments - esp for 1-segment routes
     if len(all_segs) == len(segs_visited_so_far):
@@ -560,10 +562,18 @@ def get_longest_seg_linked_chain(init_seg_id, all_segs, segs_visited_so_far,
                 if link_seg_id != prev_seg_id:
                     next_seg_id = link_seg_id
             assert next_seg_id is not None
+            next_seg_ref = get_seg_ref_with_id(next_seg_id, all_segs)
+            linking_stop_id = find_linking_stop_id(next_seg_ref, curr_seg_ref)
+            # Need this check to deal with single-segment branch cases.
+            if linking_stop_id == prev_stop_id:
+                #print "Warning:- single 'forward' link found from seg %d "\
+                #    "to seg %d, but this next seg is actually a branch "\
+                #    "from previous link. So breaking here."\
+                #    % (curr_seg_id, next_seg_id)
+                break
             # We need this extra check to avoid loops back into existing
             #  stops.
-            next_seg_ref = get_seg_ref_with_id(next_seg_id, all_segs)
-            next_stop_id = find_non_linking_stop_id(next_seg_ref, curr_seg_ref)
+            next_stop_id = get_other_stop_id(next_seg_ref, linking_stop_id)
             if next_stop_id in stop_ids_in_route_so_far:
                 #print "Warning:- single forward link found from seg %d "\
                 #    "to seg %d, but this next seg links back to an "\
@@ -624,6 +634,7 @@ def get_longest_seg_linked_chain(init_seg_id, all_segs, segs_visited_so_far,
             #    % next_seg_id
             break
         prev_seg_id = curr_seg_id
+        prev_stop_id = curr_stop_id
         prev_seg_ref = curr_seg_ref
         curr_seg_id = next_seg_id
     longest_chains_lookup_cache[init_seg_id] = seg_chain
