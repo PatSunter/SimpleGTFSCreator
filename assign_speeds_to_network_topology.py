@@ -133,10 +133,13 @@ def assign_peak_speeds_bus_melb_distance_based_mway_check(route_segments_shp, mo
 ORIGIN_LAT_LON = (-37.81081208860423, 144.969328103266179)
 
 def peak_speed_func(Z_km):
-    """Formula used as provided by Laurent Allieres, 7 Nov 2013."""
+    """Formula used as provided by Laurent Allieres, 7 Nov 2013.
+    Modified by Pat S, 2014/10/17, to cut off dist from city centre at max
+    50km - otherwise strange values result."""
+    Z_km = min(Z_km, 50)
     peak_speed = (230 + 15 * Z_km - 0.13 * Z_km**2) * 60/1000.0 * (2/3.0) \
         + 5.0/(Z_km/50.0+1)
-    return peak_speed    
+    return peak_speed
 
 def calc_peak_speed_melb_bus(route_segment, mode_config):
     assert mode_config['system'] == 'Bus'
