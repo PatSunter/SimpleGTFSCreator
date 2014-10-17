@@ -13,6 +13,7 @@ from datetime import time, datetime, date, timedelta
 import csv
 
 import transitfeed
+from osgeo import ogr, osr
 
 from misc_utils import pairs
 import lineargeom
@@ -23,6 +24,8 @@ SECS_PER_DAY = SECS_PER_HOUR * 24
 DEFAULT_FALLBACK_SEG_SPEED_KM_H = 10.0
 
 ALLOWED_ROUTE_NAME_TYPES = ['route_short_name', 'route_long_name']
+
+GTFS_EPSG = 4326
 
 # Converting transitfeed's basic time representation, to Python times,
 #   and vice-versa
@@ -167,7 +170,58 @@ def copy_selected_routes(input_schedule, output_schedule,
                     trip_cpy.AddStopTimeObject(stop_time)
     return
 
+# Selecting by geometry operations
+
+def get_route_ids_within_polygons(schedule, route_ids_to_check,
+        within_polygons_lyr):
+    """Returns a list of all route IDs within the selected polygons."""
+
+    partially_within_route_ids = []
+    # Transform the polygon geoms into same SRS as the GTFS stop for testing
+    tformed_poly_geoms = []
+    src_srs = within_polygons_lyr.GetSpatialRef()
+    gtfs_srs = osr.SpatialReference()
+    gtfs_srs.ImportFromEPSG(GTFS_EPSG)
+    transform = osr.CoordinateTransformation(src_srs, gtfs_srs)
+    for poly in within_polygons_lyr:
+        poly_geom = poly.GetGeometryRef()
+        poly_geom2 = poly_geom.Clone()
+        poly_geom2.Transform(transform)
+        tformed_poly_geoms.append(poly_geom2)
+
+    for route_id in route_ids_to_check:
+        route_within_a_poly = False
+        gtfs_route = schedule.routes[route_id]
+        #print "Checking if any stops from route %d (%s) fall within "\
+        #    "polygons ..." % (int(route_id), get_print_name(gtfs_route))
+        for poly_geom in tformed_poly_geoms:
+            all_route_stop_ids = get_all_stop_ids_used_by_route(gtfs_route,
+                schedule)
+            for stop_id in all_route_stop_ids:
+                gtfs_stop = schedule.stops[stop_id]
+                stop_pt = ogr.Geometry(ogr.wkbPoint)
+                stop_pt.AddPoint(gtfs_stop.stop_lon, gtfs_stop.stop_lat)
+                if poly_geom.Contains(stop_pt):
+                    partially_within_route_ids.append(route_id)
+                    route_within_a_poly = True
+                    break
+                stop_pt.Destroy()    
+            if route_within_a_poly:
+                break
+    return partially_within_route_ids
+
 # Extracting relevant info from a schedule, and saving to file.
+
+def get_all_stop_ids_used_by_route(gtfs_route, schedule):
+    """Returns a set (not list) of all stops visited as part of a route,
+    for all trips."""
+    stop_ids_all_trips = set([])
+    trip_dict = gtfs_route.GetPatternIdTripDict()
+    for trips in trip_dict.values():
+        stop_pattern = trips[0].GetPattern()
+        stop_ids_in_trip = map(lambda x: x.stop_id, stop_pattern)
+        stop_ids_all_trips = stop_ids_all_trips.union(set(stop_ids_in_trip))
+    return stop_ids_all_trips
 
 def getStopVisitTimesForTripPatternByServPeriod(trips):
     master_stops = trips[0].GetPattern()
@@ -617,7 +671,7 @@ def writeAvgSpeedsOnSegments(schedule, period_avg_speeds, seg_distances,
     csv_file.close()
     return
 
-def extract_route_speed_info_by_time_periods(schedule, route_name,
+def extract_route_speed_info_by_time_periods(schedule, route_long_name,
         time_periods, output_path, round_places=2,
         min_dist_for_speed_calc_m=0,
         min_time_for_speed_calc_s=60):
@@ -626,7 +680,7 @@ def extract_route_speed_info_by_time_periods(schedule, route_name,
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
-    r_id, r_info = getRouteByLongName(schedule, route_name)
+    r_id, r_info = getRouteByLongName(schedule, route_long_name)
     trip_dict = r_info.GetPatternIdTripDict()
     p_keys = trip_dict.keys()
 
@@ -661,7 +715,7 @@ def extract_route_speed_info_by_time_periods(schedule, route_name,
                 time_periods, fpath, round_places)
     return
 
-def extract_route_freq_info_by_time_periods(schedule, route_name,
+def extract_route_freq_info_by_time_periods(schedule, route_long_name,
         time_periods, output_path):
     """Note: time_periods argument of the form of a list of tuples.
     Each tuple is a pair of Python timedelta objects. First of these
@@ -671,7 +725,7 @@ def extract_route_freq_info_by_time_periods(schedule, route_name,
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
-    r_id, r_info = getRouteByLongName(schedule, route_name)
+    r_id, r_info = getRouteByLongName(schedule, route_long_name)
     trip_dict = r_info.GetPatternIdTripDict()
     p_keys = trip_dict.keys()
 

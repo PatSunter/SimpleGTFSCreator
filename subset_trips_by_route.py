@@ -11,6 +11,7 @@ import csv
 from optparse import OptionParser
 
 import transitfeed
+from osgeo import ogr, osr
 
 import parser_utils
 import gtfs_ops
@@ -90,6 +91,10 @@ def main():
         help='Names of route long names to subset and copy, comma-separated.')
     parser.add_option('--route_spec_csv', dest='route_spec_csv',
         help='Path to CSV file containing list of route names to include.')
+    parser.add_option('--partially_within_polygons',
+        dest='partially_within_polygons',
+        help='Shapefile of a set of polygons to test if each route is within'
+            'these, and only subset those that are.')
     parser.set_defaults(route_short_names='', route_long_names='')
     (options, args) = parser.parse_args()
 
@@ -100,7 +105,7 @@ def main():
         parser.print_help()
         parser.error("No output GTFS file given.") 
     if not (options.route_short_names or options.route_long_names \
-            or options.route_spec_csv):
+            or options.route_spec_csv or options.partially_within_polygons):
         parser.print_help()
         parser.error("No option to specify routes to subset given.")
 
@@ -134,22 +139,54 @@ def main():
         ag_cpy = copy.copy(agency)
         ag_cpy._schedule = None
         output_schedule.AddAgencyObject(ag_cpy)
-    for stop in input_schedule.stops.itervalues():
-        stop_cpy = copy.copy(stop)
-        stop_cpy._schedule = None
-        output_schedule.AddStopObject(stop_cpy)
     for serv_period in input_schedule.service_periods.itervalues():
         serv_period_cpy = copy.copy(serv_period)
         output_schedule.AddServicePeriodObject(serv_period_cpy)
 
-    matched_gtfs_route_ids, match_statuses = \
-        route_segs.get_gtfs_route_ids_matching_route_defs(route_defs_to_subset,
-            input_schedule.routes.itervalues())
+    if route_defs_to_subset:
+        print "Calculating subset of routes based on matching supplied "\
+            "route short names, long names, and IDs."
+        matched_gtfs_route_ids, match_statuses = \
+            route_segs.get_gtfs_route_ids_matching_route_defs(
+                route_defs_to_subset,
+                input_schedule.routes.itervalues())
+        subset_gtfs_route_ids = matched_gtfs_route_ids
+    else:
+        subset_gtfs_route_ids = input_schedule.routes.keys()
+
+    if options.partially_within_polygons:
+        print "Calculating subset of routes based on being at least partly "\
+            "within polygons in supplied shape file."
+        polygons_fname = os.path.expanduser(options.partially_within_polygons)
+        polygons_shp = ogr.Open(polygons_fname, 0)
+        if polygons_shp is None:
+            print "Error, partially within polygons shape file given, %s , "\
+                "failed to open." % (options.partially_within_polygons)
+            sys.exit(1)
+        polygons_lyr = polygons_shp.GetLayer(0)
+        subset_gtfs_route_ids = gtfs_ops.get_route_ids_within_polygons(
+            input_schedule, subset_gtfs_route_ids, polygons_lyr)
+        polygons_shp.Destroy()
+
+    print "Copying stops used in the %d " \
+        "matched routes." % len(subset_gtfs_route_ids)
+    stop_ids_in_subset_routes = set([])
+    for r_id in subset_gtfs_route_ids:
+        route = input_schedule.routes[r_id]
+        stop_ids_in_route = gtfs_ops.get_all_stop_ids_used_by_route(route,
+            input_schedule)
+        stop_ids_in_subset_routes = stop_ids_in_subset_routes.union(
+            stop_ids_in_route)
+    for stop_id in stop_ids_in_subset_routes:
+        stop = input_schedule.stops[stop_id]
+        stop_cpy = copy.copy(stop)
+        stop_cpy._schedule = None
+        output_schedule.AddStopObject(stop_cpy)
 
     print "Copying routes, trips, and trip stop times for the %d " \
-        "matched routes." % len(matched_gtfs_route_ids)
+        "matched routes." % len(subset_gtfs_route_ids)
     gtfs_ops.copy_selected_routes(input_schedule, output_schedule,
-        matched_gtfs_route_ids)
+        subset_gtfs_route_ids)
 
     input_schedule = None
     print "About to do output schedule validate and write ...."
