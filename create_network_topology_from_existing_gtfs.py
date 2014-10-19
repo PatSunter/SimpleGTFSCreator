@@ -20,13 +20,10 @@ from misc_utils import pairs
 
 DELETE_EXISTING = True
 
-# GTFS stop coordinates are geographic lat-lons
-GTFS_STOPS_EPSG = 4326
-
 def add_all_stops_from_gtfs(schedule, stops_lyr, stops_multipoint):
     print "Adding all stops from GTFS file."
     gtfs_srs = osr.SpatialReference()
-    gtfs_srs.ImportFromEPSG(GTFS_STOPS_EPSG)
+    gtfs_srs.ImportFromEPSG(gtfs_ops.GTFS_EPSG)
 
     gtfs_stop_id_to_stop_id_map = {}
 
