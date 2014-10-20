@@ -242,6 +242,25 @@ def get_gtfs_route_ids_matching_route_defs(route_defs_to_match, gtfs_routes):
                 % (unmatched_r_def.id, get_print_name(unmatched_r_def))
     return matching_gtfs_ids, route_defs_match_status
 
+def create_route_defs_list_from_route_segs(segs_by_route,
+        route_dirs, mode_config, r_ids_output_order=None):
+    """Turn a dict containing ordered lists of seg references that make up
+    each route (segs_by_route) and related dictionary of route dir names
+    (route_dirs) into a list of route definitions. If r_ids_output_order
+    provided, routes defs in list will be ordered in that order."""
+    route_defs = []
+    if r_ids_output_order is None:
+        r_ids_output_order = segs_by_route.keys()
+
+    for r_id in r_ids_output_order:
+        # Haven't yet implemented ability to create route long names
+        r_short_name = tp_model.route_name_from_id(r_id, mode_config)
+        r_long_name = None
+        rdef = Route_Def(r_id, r_short_name, r_long_name, route_dirs[r_id],
+            map(operator.attrgetter('seg_id'), segs_by_route[r_id]))
+        route_defs.append(rdef)
+    return route_defs
+
 #########
 ### Functions to do with querying network topology
 
@@ -651,49 +670,60 @@ def get_longest_seg_linked_chain(init_seg_id, all_segs, segs_visited_so_far,
         len(stop_ids_in_route_thus_far)
     return seg_chain, len(seg_chain)
 
-def order_all_route_segments(all_segs_by_route, mode_config, r_ids_sorted=None):
+def order_all_route_segments(all_segs_by_route, r_ids_sorted=None):
     # Now order each route properly ...
     # for each route - find unique stop names 
     if r_ids_sorted == None:
         r_ids_sorted = sorted(all_segs_by_route.keys())
     segs_by_routes_ordered = {}
-    route_dirs = {}
     for r_id in r_ids_sorted:
-        rname = tp_model.route_name_from_id(r_id)
-        print "Ordering segments by traversal for route %d: '%s'" \
-            % (r_id, rname)
+        print "Ordering segments by traversal for route ID %d:" \
+            % (r_id)
         route_seg_refs = all_segs_by_route[r_id]
         if len(route_seg_refs) == 1:
             segs_by_routes_ordered[r_id] = route_seg_refs
-            start_stop = route_seg_refs[0].first_id
-            end_stop = route_seg_refs[0].second_id
         else:
             seg_links = build_seg_links(route_seg_refs)
             ordered_seg_refs = order_segs_based_on_links(route_seg_refs,
                 seg_links)
             segs_by_routes_ordered[r_id] = ordered_seg_refs
-            # Now create the directions
-            first_seg, second_seg = ordered_seg_refs[0], ordered_seg_refs[1]
-            linkstop = find_linking_stop_id(first_seg, second_seg)
-            if first_seg.first_id != linkstop:
-                start_stop = first_seg.first_id
-            else:
-                start_stop = first_seg.second_id
-            last_seg = ordered_seg_refs[-1]
-            second_last_seg = ordered_seg_refs[-2]
-            linkstop = find_linking_stop_id(last_seg, second_last_seg)
-            if last_seg.first_id != linkstop:
-                end_stop = last_seg.first_id
-            else:
-                end_stop = last_seg.second_id
-        dir1 = "%s->%s" % (tp_model.stop_name_from_id(start_stop, mode_config), \
-            tp_model.stop_name_from_id(end_stop, mode_config))
-        dir2 = "%s->%s" % (tp_model.stop_name_from_id(end_stop, mode_config), \
-            tp_model.stop_name_from_id(start_stop, mode_config))
-        route_dirs[r_id] = (dir1, dir2)
+
     assert len(segs_by_routes_ordered) == len(all_segs_by_route)
-    assert len(segs_by_routes_ordered) == len(route_dirs)
-    return segs_by_routes_ordered, route_dirs
+    return segs_by_routes_ordered
+
+def create_basic_route_dir_names(all_segs_by_route, mode_config):
+    """Creating basic direction names for routes :- based on first and last
+    stop ids and names in each route."""
+    route_dir_names = {}
+    for r_id, route_seg_refs in all_segs_by_route.iteritems():
+        if len(route_seg_refs) == 1:
+            start_stop = route_seg_refs[0].first_id
+            end_stop = route_seg_refs[0].second_id
+        else:    
+            first_seg, second_seg = route_seg_refs[0], route_seg_refs[1]
+            start_stop = find_non_linking_stop_id(first_seg, second_seg)
+            if start_stop is None:
+                print "Error in working out directions for route ID %d:- "\
+                    "first and second segments don't link via a common stop!"\
+                    % r_id
+                sys.exit(1)    
+            last_seg = route_seg_refs[-1]
+            second_last_seg = route_seg_refs[-2]
+            end_stop = find_non_linking_stop_id(last_seg, second_last_seg)
+            if end_stop is None:
+                print "Error in working out directions for route ID %d:- "\
+                    "last and second last segments don't link via a "\
+                    "common stop!"\
+                    % r_id
+                sys.exit(1)    
+
+        first_stop_name = tp_model.stop_name_from_id(start_stop, mode_config) 
+        last_stop_name = tp_model.stop_name_from_id(end_stop, mode_config)
+        dir1 = "%s->%s" % (first_stop_name, last_stop_name)
+        dir2 = "%s->%s" % (last_stop_name, first_stop_name)
+        route_dir_names[r_id] = (dir1, dir2)
+    assert len(all_segs_by_route) == len(route_dir_names)
+    return route_dir_names
 
 def extract_stop_list_along_route(ordered_seg_refs):
     stop_ids = []

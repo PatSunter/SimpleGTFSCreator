@@ -299,15 +299,21 @@ def add_route_to_seg(segments_lyr, seg_feat, route_name):
 def stop_name_from_id(stop_id, mode_config):
     return "%s%d" % (mode_config['stop_prefix'], stop_id)
 
-def route_name_from_id(route_id):
-    return "R%03d" % route_id
+def route_name_from_id(route_id, mode_config):
+    return "%s%03d" % (mode_config['route_prefix'], route_id)
 
 # NOTE : this is a specific simple data model for early simple GTFS creator
 # work. Probably should generalise and just record an ID for each route in
 # the actual shapefile/database.
 def route_id_from_name(route_name):
-    assert route_name[0] == 'R'
-    r_id = int(route_name[1:])
+    # prefixc characters could by 'R', 'M' etc.
+    try:
+        r_id = int(re.findall(r'\d+', route_name)[0])
+    except IndexError:
+        print "Error:- for route name '%s', couldn't extract an ID. "\
+            "Route names should be of pattern text prefix followed by "\
+            "a route number, e.g. 'R43', 'M002'." \
+            % (route_name)
     return r_id
 
 def get_stop_ids_of_seg(seg_feature):

@@ -65,7 +65,7 @@ def create_segments_from_route_geoms_and_stops(input_routes_lyr,
     Note: See comments re projections below, it gets a bit tricky
     in this one."""
     all_seg_refs = []
-    route_seg_refs = []
+    route_seg_refs = {}
     routes_srs = input_routes_lyr.GetSpatialRef()
     stops_srs = input_stops_lyr.GetSpatialRef()
     target_srs = osr.SpatialReference()
@@ -198,11 +198,11 @@ def create_segments_from_route_geoms_and_stops(input_routes_lyr,
                     # Two stops on same position (bad). Skip one of them.
                     if last_stop_id_before_skipping == None:
                         last_stop_id_before_skipping = last_stop_id
-                    print "..Warning: two stops at same location: "\
-                        "stop ids %d and %d (loc on route is %s)- "\
-                        "Skipping creating a segment here." %\
-                        (last_stop_id, next_stop_id, \
-                         next_stop_on_route_isect)
+                    #print "..Warning: two stops at same location: "\
+                    #    "stop ids %d and %d (loc on route is %s)- "\
+                    #    "Skipping creating a segment here." %\
+                    #    (last_stop_id, next_stop_id, \
+                    #     next_stop_on_route_isect)
                     stop_is_to_remove_from_search.append(
                         next_stop_i_in_route_set)
                 elif (skipped_dist + dist_to_next) < MIN_SEGMENT_LENGTH and \
@@ -212,13 +212,14 @@ def create_segments_from_route_geoms_and_stops(input_routes_lyr,
                     if last_stop_id_before_skipping == None:
                         last_stop_id_before_skipping = last_stop_id
                     skipped_dist += dist_to_next
-                    print "..Note: skipping stop id %d because it is still "\
-                        "within min seg length, %.1fm, of last segment stop "\
-                        "%d. Dist to last = %.5fm. Dist skipped so far: %.5fm."\
-                        "(Loc on route is %s)." %\
-                        (next_stop_id, MIN_SEGMENT_LENGTH,
-                         last_stop_id_before_skipping, dist_to_next, \
-                         skipped_dist, next_stop_on_route_isect)
+                    #print "..Note: skipping stop id %d because it is still "\
+                    #    "within min seg length, %.1fm, of last segment stop "\
+                    #    "%d. Dist to last = %.5fm. "\
+                    #    "Dist skipped so far: %.5fm. "\
+                    #    "(Loc on route is %s)." %\
+                    #    (next_stop_id, MIN_SEGMENT_LENGTH,
+                    #     last_stop_id_before_skipping, dist_to_next, \
+                    #     skipped_dist, next_stop_on_route_isect)
                     stop_is_to_remove_from_search.append(
                         next_stop_i_in_route_set)
                 else:
@@ -256,7 +257,7 @@ def create_segments_from_route_geoms_and_stops(input_routes_lyr,
                     " current loc (may not be source of problems) is %s." %\
                     (len(seg_refs_this_route), current_loc)
                 sys.exit(1)
-        route_seg_refs.append((r_id,seg_refs_this_route))
+        route_seg_refs[r_id] = seg_refs_this_route
         end_cnt = len(all_seg_refs)
         assert (end_cnt - start_cnt) == new_segs_cnt
         print "..Added %d seg refs for this route (%d of which were new)." % \
@@ -284,10 +285,13 @@ if __name__ == "__main__":
     parser = OptionParser()
     parser.add_option('--routes', dest='inputroutes',
         help='Shapefile of line routes.')
-    parser.add_option('--segments', dest='outputsegments',
-        help='Shapefile of line segments to create.')
     parser.add_option('--stops', dest='inputstops',
         help='Shapefile of line stops to create.')
+    parser.add_option('--segments', dest='outputsegments',
+        help='Shapefile of line segments to create.')
+    parser.add_option('--route_defs_csv', dest='output_route_defs',
+        help='Path to write route definitions (list of ordered segments) '
+            'in each direction) CSV file to.')
     parser.add_option('--service', dest='service',
         help="Should be one of %s" % allowedServs)
     (options, args) = parser.parse_args()    
@@ -295,12 +299,15 @@ if __name__ == "__main__":
     if options.inputroutes is None:
         parser.print_help()
         parser.error("No routes shapefile path given.")
-    if options.outputsegments is None:
-        parser.print_help()
-        parser.error("No segments shapefile path given.")
     if options.inputstops is None:
         parser.print_help()
         parser.error("No stops shapefile path given.")
+    if options.outputsegments is None:
+        parser.print_help()
+        parser.error("No segments shapefile path given.")
+    if options.output_route_defs is None:
+        parser.print_help()
+        parser.error("No output route definitions CSV file path given.")
     if options.service is None:
         parser.print_help()
         parser.error("No service option requested. Should be one of %s" \
@@ -312,22 +319,22 @@ if __name__ == "__main__":
 
     mode_config = m_t_info.settings[options.service]
 
-    routes_fname = os.path.expanduser(options.inputroutes)
-    input_routes_shp = osgeo.ogr.Open(routes_fname, 0)
+    route_geoms_fname = os.path.expanduser(options.inputroutes)
+    input_routes_shp = osgeo.ogr.Open(route_geoms_fname, 0)
     if input_routes_shp is None:
         print "Error, input route geometries shape file given, %s , failed "
         "to open." % (options.inputroutes)
         sys.exit(1)
     input_routes_lyr = input_routes_shp.GetLayer(0)    
-    routes_shp = osgeo.ogr.Open(routes_fname, 0)
+    routes_shp = osgeo.ogr.Open(route_geoms_fname, 0)
 
     stops_fname = os.path.expanduser(options.inputstops)
-    stops_shp = osgeo.ogr.Open(stops_fname, 0)
-    if stops_shp is None:
+    input_stops_shp = osgeo.ogr.Open(stops_fname, 0)
+    if input_stops_shp is None:
         print "Error, newly created stops shape file, %s , failed to open." \
-            % (stops_shp_file_name)
+            % (input_stops_shp_file_name)
         sys.exit(1)
-    stops_lyr = stops_shp.GetLayer(0)   
+    stops_lyr = input_stops_shp.GetLayer(0)   
 
     # The other shape files we're going to create :- so don't check
     #  existence, just read names.
@@ -335,15 +342,27 @@ if __name__ == "__main__":
     segments_shp_file, segments_lyr = tp_model.create_segs_shp_file(
         segments_fname, delete_existing=DELETE_EXISTING)
 
+    route_defs_fname = options.output_route_defs
+
     all_seg_refs, segs_by_route = create_segments_from_route_geoms_and_stops(
         input_routes_lyr, stops_lyr)
 
     # Now write to shapefiles
     route_segs.write_segments_to_shp_file(segments_lyr, stops_lyr,
         all_seg_refs, mode_config)
-    # Force write to disk.
+    # Force write to disk of new segments shp file.
     segments_shp_file.Destroy()
-    stops_shp.Destroy()    
-    # Cleanup input.
-    input_routes_shp.Destroy()
 
+    # Create route definitions from the per-route segment lists, and write.
+    route_dirs = route_segs.create_basic_route_dir_names(
+        segs_by_route, mode_config)
+    print "Now writing ordered lists of segments per route to %s:" \
+        % (route_defs_fname)
+    r_ids_ordered = sorted(segs_by_route.keys())
+    route_defs = route_segs.create_route_defs_list_from_route_segs(
+        segs_by_route, route_dirs, mode_config, r_ids_ordered)
+    route_segs.write_route_defs(route_defs_fname, route_defs)
+
+    # Cleanup input.
+    input_stops_shp.Destroy()    
+    input_routes_shp.Destroy()
