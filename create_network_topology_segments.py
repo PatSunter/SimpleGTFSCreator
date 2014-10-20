@@ -58,7 +58,12 @@ def get_multipoint_within_with_map(multipoint, test_geom):
             isect_map.append(pt_i)
     return mpoint_within, isect_map
 
-def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
+def create_segments_from_route_geoms_and_stops(input_routes_lyr,
+        input_stops_lyr):
+    """Creates all the route segments, from a given set of route geometries,
+    and stops along those routes.
+    Note: See comments re projections below, it gets a bit tricky
+    in this one."""
     all_seg_refs = []
     route_seg_refs = []
     routes_srs = input_routes_lyr.GetSpatialRef()
@@ -66,7 +71,7 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
     target_srs = osr.SpatialReference()
     target_srs.ImportFromEPSG(route_geom_ops.COMPARISON_EPSG)
 
-    # First, get a multipoint in right projection.
+    # First, get a stops multipoint in right projection.
     stops_multipoint = build_multipoint_from_lyr(input_stops_lyr)
     reproject_all_multipoint(stops_multipoint, target_srs)
 
@@ -78,7 +83,6 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
         # TODO: probably should enforce and use an ID field in route shp file,
         #  rather than use this function.
         r_id = tp_model.route_id_from_name(rname)
-        #if rname != "R71": continue
         start_cnt = len(all_seg_refs)
         new_segs_cnt = 0
         seg_refs_this_route = []
@@ -120,7 +124,8 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
         last_stop_id_before_skipping = None
         while line_remains is True:
             # Pass in all_stop_is here, except the stop we just visited:
-            # to allow for possibility of a route that visits the same stop more than once.
+            # to allow for possibility of a route that visits the same stop
+            # more than once.
             allowed_stop_is = all_stop_is[:]
             if last_stop_i_along_route is not None:
                 for si in stop_is_to_remove_from_search:
@@ -268,41 +273,10 @@ def build_seg_ref_lists(input_routes_lyr, input_stops_lyr):
     mean_segs_per_route = total_segs / float(nroutes)
     print "\nAdded %d new seg refs in total for the %d routes (av. %.1f "\
         "segs/route)." % (total_segs, nroutes, mean_segs_per_route)
+    # Rewind routes lyr at end, in case it will be used again.
     input_routes_lyr.ResetReading()
+
     return all_seg_refs, route_seg_refs
-
-def create_segments(input_routes_lyr, input_stops_lyr, segs_shp_file_name,
-        mode_config):
-    """Creates all the route segments, from a given set of stops.
-    Note: See comments re projections below, it gets a bit tricky in this one."""
-    
-    stops_srs = input_stops_lyr.GetSpatialRef()
-
-    all_seg_refs, route_seg_refs = build_seg_ref_lists(input_routes_lyr,
-        input_stops_lyr)
-
-    print "Writing segment references to shapefile..."
-    segs_shp_file, segments_lyr = tp_model.create_segs_shp_file(
-        segs_shp_file_name, delete_existing=DELETE_EXISTING)
-
-    # Build lookup table by stop ID into stops layer - for speed
-    stops_lookup_dict = tp_model.build_stops_lookup_table(input_stops_lyr)
-
-    for seg_ref in all_seg_refs:
-        # look up corresponding stops in lookup table, and build geometry
-        stop_feat_a = stops_lookup_dict[seg_ref.first_id]
-        stop_feat_b = stops_lookup_dict[seg_ref.second_id]
-        seg_geom = ogr.Geometry(ogr.wkbLineString)
-        seg_geom.AssignSpatialReference(stops_srs)
-        seg_geom.AddPoint(*stop_feat_a.GetGeometryRef().GetPoint(0))
-        seg_geom.AddPoint(*stop_feat_b.GetGeometryRef().GetPoint(0))
-        seg_ii = tp_model.add_seg_ref_as_feature(
-            segments_lyr, seg_ref, seg_geom, mode_config)
-        seg_geom.Destroy()
-    # Force a write.
-    segs_shp_file.Destroy()
-    print "...done writing."
-    return
 
 if __name__ == "__main__":
     allowedServs = ', '.join(sorted(["'%s'" % key for key in \
@@ -341,8 +315,8 @@ if __name__ == "__main__":
     routes_fname = os.path.expanduser(options.inputroutes)
     input_routes_shp = osgeo.ogr.Open(routes_fname, 0)
     if input_routes_shp is None:
-        print "Error, input routes shape file given, %s , failed to open." \
-            % (options.inputroutes)
+        print "Error, input route geometries shape file given, %s , failed "
+        "to open." % (options.inputroutes)
         sys.exit(1)
     input_routes_lyr = input_routes_shp.GetLayer(0)    
     routes_shp = osgeo.ogr.Open(routes_fname, 0)
@@ -358,10 +332,18 @@ if __name__ == "__main__":
     # The other shape files we're going to create :- so don't check
     #  existence, just read names.
     segments_fname = os.path.expanduser(options.outputsegments)
+    segments_shp_file, segments_lyr = tp_model.create_segs_shp_file(
+        segments_fname, delete_existing=DELETE_EXISTING)
 
-    create_segments(input_routes_lyr, stops_lyr,
-        segments_fname, mode_config)
+    all_seg_refs, segs_by_route = create_segments_from_route_geoms_and_stops(
+        input_routes_lyr, stops_lyr)
 
-    # Cleanup
-    input_routes_shp.Destroy()
+    # Now write to shapefiles
+    route_segs.write_segments_to_shp_file(segments_lyr, stops_lyr,
+        all_seg_refs, mode_config)
+    # Force write to disk.
+    segments_shp_file.Destroy()
     stops_shp.Destroy()    
+    # Cleanup input.
+    input_routes_shp.Destroy()
+

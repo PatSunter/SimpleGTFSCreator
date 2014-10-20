@@ -128,10 +128,10 @@ def get_gtfs_route_ids_in_output_order(routes_dict):
         temp_route_defs)
     return gtfs_route_id_output_order
 
-def add_route_segments_from_gtfs(schedule, segments_lyr,
+def get_route_defs_and_segments_from_gtfs(schedule, segments_lyr,
         stops_lyr, gtfs_stop_id_to_stop_id_map, mode_config,
         line_start_stop_info = None):
-    """Add all the route segments from an existing GTFS file, to a GIS
+    """Get all the route segments from an existing GTFS file, to a GIS
     segments layer. Return the list of route_defs describing the routes."""
     route_defs = []
     seg_distances = {}
@@ -210,24 +210,7 @@ def add_route_segments_from_gtfs(schedule, segments_lyr,
             map(operator.attrgetter('seg_id'), updated_segs_this_route))
         route_defs.append(route_def)
 
-    # now add the refined list of segments to the shapefile.
-    print "Writing segment references to shapefile..."
-    # Build lookup table by stop ID into stops layer - for speed
-    stops_srs = stops_lyr.GetSpatialRef()
-    stops_lookup_dict = tp_model.build_stops_lookup_table(stops_lyr)
-    for seg_ref in segs_all_routes:
-        # look up corresponding stops in lookup table, and build geometry
-        stop_feat_a = stops_lookup_dict[seg_ref.first_id]
-        stop_feat_b = stops_lookup_dict[seg_ref.second_id]
-        seg_geom = ogr.Geometry(ogr.wkbLineString)
-        seg_geom.AssignSpatialReference(stops_srs)
-        seg_geom.AddPoint(*stop_feat_a.GetGeometryRef().GetPoint(0))
-        seg_geom.AddPoint(*stop_feat_b.GetGeometryRef().GetPoint(0))
-        tp_model.add_seg_ref_as_feature( segments_lyr, seg_ref,
-            seg_geom, mode_config)
-        seg_geom.Destroy()
-
-    return route_defs
+    return route_defs, segs_all_routes
 
 def parse_line_start_stops_csv_file(line_start_stop_info_csv_fname):
     line_start_stop_dict = {}
@@ -325,18 +308,22 @@ def main():
         line_start_stop_info = parse_line_start_stops_csv_file(
             options.line_start_stops)
 
+    # Now read out stops and segments from GTFS :- converting the multiple
+    #  patterns per route in GTFS if necessary into a 'full-stop pattern'.
     gtfs_stop_id_to_stop_id_map = add_all_stops_from_gtfs(schedule,
         stops_lyr, stops_multipoint)
-    route_defs = add_route_segments_from_gtfs(schedule, segments_lyr,
-        stops_lyr, gtfs_stop_id_to_stop_id_map, mode_config,
+    route_defs, all_segs = get_route_defs_and_segments_from_gtfs(schedule,
+        segments_lyr, stops_lyr, gtfs_stop_id_to_stop_id_map, mode_config,
         line_start_stop_info)
+    # Now write to GIS files.
+    route_segs.write_segments_to_shp_file(segments_lyr, stops_lyr,
+        all_segs, mode_config)
+    route_segs.write_route_defs(route_defs_fname, route_defs)
+
     # Force a write.
     stops_shp_file.Destroy()
     segments_shp_file.Destroy()
     print "...done writing."
-
-    route_segs.write_route_defs(route_defs_fname, route_defs)
-
     # Cleanup
     schedule = None
     return

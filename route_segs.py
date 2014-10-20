@@ -54,9 +54,10 @@ class Route_Def:
         self.ordered_seg_ids = ordered_seg_ids
   
 class Seg_Reference:
-    """A small lightweight class for using as an in-memory storage of key segment
-    topology information, and reference to actual segment feature in a 
-    shapefile layer. This is designed to save cost of reading actual
+    """A small lightweight class for using as an in-memory storage of 
+    key segment topology information, and reference to actual segment
+    feature in a shapefile layer.
+    This is designed to save cost of reading actual
     shapefile frequently, e.g. for algorithms that need to search and/or
     add to segments list a lot."""
     def __init__(self, seg_id, first_stop_id, second_stop_id,
@@ -720,7 +721,8 @@ def extract_stop_list_along_route(ordered_seg_refs):
 def seg_ref_from_feature(seg_feature):
     seg_id = int(seg_feature.GetField(tp_model.SEG_ID_FIELD))
     stop_id_a, stop_id_b = tp_model.get_stop_ids_of_seg(seg_feature)
-    route_dist_on_seg = float(seg_feature.GetField(tp_model.SEG_ROUTE_DIST_FIELD))
+    route_dist_on_seg = float(seg_feature.GetField(
+        tp_model.SEG_ROUTE_DIST_FIELD))
     seg_rlist = tp_model.get_routes_on_seg(seg_feature)
     seg_ref = Seg_Reference(seg_id, stop_id_a, stop_id_b, 
         route_dist_on_seg=route_dist_on_seg, routes=seg_rlist)
@@ -747,6 +749,35 @@ def create_ordered_seg_refs_from_ids(ordered_seg_ids, segs_lookup_table):
         seg_ref = seg_ref_from_feature(seg_feature)
         ordered_seg_refs.append(seg_ref)
     return ordered_seg_refs
+
+def write_seg_ref_to_shp_file(seg_ref, segments_lyr, stop_feat_a, stop_feat_b,
+        stops_srs, mode_config):
+    # Create line geometry based on two stops.
+    seg_geom = tp_model.create_seg_geom_from_stop_pair(stop_feat_a,
+        stop_feat_b, stops_srs)
+    seg_ii = tp_model.add_segment(segments_lyr,
+        seg_ref.seg_id, seg_ref.routes, seg_ref.first_id, seg_ref.second_id,
+        seg_ref.route_dist_on_seg, seg_geom, mode_config)
+    seg_geom.Destroy()
+    return seg_ii
+
+def write_segments_to_shp_file(segments_lyr, input_stops_lyr, seg_refs,
+        mode_config):
+    """Write all segments defined by input seg_refs list to the segments_lyr.
+    Geometries of segments defined by stop pairs in input_stops_lyr.
+    """
+    print "Writing segment references to shapefile:"
+    stops_srs = input_stops_lyr.GetSpatialRef()
+    # Build lookup table by stop ID into stops layer - for speed
+    stops_lookup_dict = tp_model.build_stops_lookup_table(input_stops_lyr)
+    for seg_ref in seg_refs:
+        # look up corresponding stops in lookup table, and build geometry
+        stop_feat_a = stops_lookup_dict[seg_ref.first_id]
+        stop_feat_b = stops_lookup_dict[seg_ref.second_id]
+        seg_ii = write_seg_ref_to_shp_file(seg_ref, segments_lyr,
+            stop_feat_a, stop_feat_b, stops_srs, mode_config)
+    print "...done writing."
+    return
 
 ###############################
 # I/O from route definition CSV

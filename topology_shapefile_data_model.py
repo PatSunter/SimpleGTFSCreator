@@ -318,7 +318,25 @@ def get_stop_ids_of_seg(seg_feature):
     pt_b_id = int(re.findall(r'\d+', pt_b_name)[0])
     return pt_a_id, pt_b_id
 
-def add_seg_ref_as_feature(segs_lyr, seg_ref, seg_geom, mode_config):
+def create_seg_geom_from_stop_pair(stop_feat_a, stop_feat_b, stops_srs):
+    seg_geom = ogr.Geometry(ogr.wkbLineString)
+    seg_geom.AssignSpatialReference(stops_srs)
+    seg_geom.AddPoint(*stop_feat_a.GetGeometryRef().GetPoint(0))
+    seg_geom.AddPoint(*stop_feat_b.GetGeometryRef().GetPoint(0))
+    return seg_geom
+
+def add_segment(segs_lyr, seg_id, seg_routes, stop_a_id, stop_b_id,
+        route_dist_on_seg, seg_geom, mode_config,
+        seg_free_speed=0.0, seg_peak_speed=0.0):
+    """
+    Add a single route segment to segments shape file, defined by input
+    parameters.
+    (mode_config paramenter needed at the moment, since we prefix stop ids
+    with a letter based on mode at the moment in the shapefile.)
+
+    NOTE:- not sure this is exactly how I should handle optional free and
+    peak speeds, as arguments :- leave this till I refactor speed of segments
+    properly anyway."""
     seg_ii = segs_lyr.GetFeatureCount()
     #Create seg feature, with needed fields etc.
     seg_feat = ogr.Feature(segs_lyr.GetLayerDefn())
@@ -334,16 +352,16 @@ def add_seg_ref_as_feature(segs_lyr, seg_ref, seg_geom, mode_config):
     seg_geom2 = seg_geom.Clone()
     seg_geom2.Transform(transform)
     seg_feat.SetGeometry(seg_geom2)
-    seg_feat.SetField(SEG_ID_FIELD, seg_ref.seg_id)
-    seg_feat.SetField(SEG_ROUTE_LIST_FIELD, ",".join(map(str, seg_ref.routes)))
+    seg_feat.SetField(SEG_ID_FIELD, seg_id)
+    seg_feat.SetField(SEG_ROUTE_LIST_FIELD, ",".join(map(str, seg_routes)))
     seg_feat.SetField(SEG_STOP_1_NAME_FIELD,
-        stop_name_from_id(seg_ref.first_id, mode_config))
+        stop_name_from_id(stop_a_id, mode_config))
     seg_feat.SetField(SEG_STOP_2_NAME_FIELD,
-        stop_name_from_id(seg_ref.second_id, mode_config))
+        stop_name_from_id(stop_b_id, mode_config))
     # Rounding to nearest meter below per convention.
-    seg_feat.SetField(SEG_ROUTE_DIST_FIELD, "%.0f" % seg_ref.route_dist_on_seg)
-    seg_feat.SetField(SEG_FREE_SPEED_FIELD, 0.0)
-    seg_feat.SetField(SEG_PEAK_SPEED_FIELD, 0.0)
+    seg_feat.SetField(SEG_ROUTE_DIST_FIELD, "%.0f" % route_dist_on_seg)
+    seg_feat.SetField(SEG_FREE_SPEED_FIELD, seg_free_speed)
+    seg_feat.SetField(SEG_PEAK_SPEED_FIELD, seg_peak_speed)
     segs_lyr.CreateFeature(seg_feat)
     seg_feat.Destroy()
     seg_geom2.Destroy()
