@@ -96,6 +96,7 @@ settings = {
         'services_info': DEFAULT_SERVICE_INFO,
         'id': 30,
         'index': 3000000,
+        'route_prefix': 'TR',
         'stop_prefix': 'TR',
     },
     'tram': {
@@ -108,6 +109,7 @@ settings = {
         'services_info': DEFAULT_SERVICE_INFO,
         'id': 32,
         'index': 3200000,
+        'route_prefix': 'TM',
         'stop_prefix': 'TM',
     },
     'bus': {
@@ -120,6 +122,7 @@ settings = {
         'services_info': RAMPED_SERVICE_INFO,
         'id': 34,
         'index': 3400000,
+        'route_prefix': 'R',
         'stop_prefix': 'B',
         # Dist used to decide if segments are considered 'on motorway'
         # for speed purposes
@@ -136,6 +139,7 @@ settings = {
         'services_info': RAMPED_SERVICE_INFO,
         'id': 36,
         'index': 3600000,
+        'route_prefix': 'M',
         'stop_prefix': 'N',
         'on_motorway_seg_check_dist': 80,
         'min_seg_length_on_motorways': 300,
