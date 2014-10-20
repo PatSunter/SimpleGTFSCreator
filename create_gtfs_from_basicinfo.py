@@ -278,16 +278,6 @@ def calc_time_on_next_segment_no_seg_speeds(seq_stop_info, mode_config,
     # Need to round this to nearest second and return as a timedelta.
     return timedelta(seconds=round(time_hrs * 3600))
     
-# Deprecated! Don't use, very slow.
-def _get_gtfs_stop_byname(stop_name, schedule):
-    try:
-        stop = [s for s in schedule.GetStopList() if s.stop_name == stop_name][0]
-    except IndexError:
-        print "Error: seems like stop with name '%s' isn't yet in GTFS " \
-            "stops DB." % stop_name
-        sys.exit(1)
-    return stop 
-
 def build_stop_list_and_seg_info_along_route(route_def, dir_id,
         route_segments_shp, stops_shp, mode_config, schedule, use_seg_speeds,
         stop_id_to_gtfs_stop_id_map):
@@ -417,8 +407,9 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time,
         # Given elapsed time at stop we just added:- have we just crossed over
         # int peak period of schedule for this mode? Will affect calc. time to
         # next stop.
-        # N.B.: first part of check is- for last trips of the 'day' (even if after
-        # (midnite), they will may still be on the road/rails after the
+        # N.B.: first part of check is- for last trips of the 'day' 
+        # (even if after # midnite), they will may still be on the
+        # road/rails after the
         # nominal end time of the period. In this case, just keep going
         # in same conditions of current period.
         serv_elapsed = m_t_info.calc_total_service_time_elapsed(
@@ -432,7 +423,8 @@ def create_gtfs_trip_stoptimes(trip, trip_start_time,
             
         # Only have to do time inc. calculations if more stops remaining.
         if (stop_seq+1) < n_stops_on_route:
-            time_inc = calc_time_on_next_segment_func(s_info, mode_config, peak_status)
+            time_inc = calc_time_on_next_segment_func(s_info, mode_config,
+                peak_status)
             cumulative_time_on_trip += time_inc
     return
 
