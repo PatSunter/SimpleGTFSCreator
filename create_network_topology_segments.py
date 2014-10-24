@@ -12,14 +12,13 @@ from osgeo import ogr, osr
 import route_geom_ops
 import topology_shapefile_data_model as tp_model
 import route_segs
-
+import seg_speed_models
 import mode_timetable_info as m_t_info
 
 DELETE_EXISTING = True
 # This skips building very short segments.
 #MIN_SEGMENT_LENGTH = 50.0
 MIN_SEGMENT_LENGTH = 50.0
-
 
 def build_multipoint_from_lyr(stops_lyr):
     stops_multipoint = ogr.Geometry(ogr.wkbMultiPoint)
@@ -338,9 +337,10 @@ if __name__ == "__main__":
 
     # The other shape files we're going to create :- so don't check
     #  existence, just read names.
+    speed_model = seg_speed_models.PerSegmentPeakOffPeakSpeedModel()
     segments_fname = os.path.expanduser(options.outputsegments)
     segments_shp_file, segments_lyr = tp_model.create_segs_shp_file(
-        segments_fname, delete_existing=DELETE_EXISTING)
+        segments_fname, speed_model, delete_existing=DELETE_EXISTING)
 
     route_defs_fname = options.output_route_defs
 

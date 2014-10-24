@@ -20,8 +20,6 @@ SEG_ROUTE_LIST_FIELD = "route_list" # str, 254
 SEG_STOP_1_NAME_FIELD = "pt_a"      # str, 24
 SEG_STOP_2_NAME_FIELD = "pt_b"      # str, 24
 SEG_ROUTE_DIST_FIELD = 'leg_length' # real, 24, 15
-SEG_FREE_SPEED_FIELD = "free_speed" # real, 24, 15
-SEG_PEAK_SPEED_FIELD = "peak_speed" # real, 24, 15
 ROUTE_DIST_RATIO_TO_KM = 1000       # As it says - effectively encodes units
 
 EPSG_STOPS_FILE = 4326
@@ -238,7 +236,8 @@ def add_stop(stops_lyr, stops_multipoint, stop_type, stop_geom, src_srs):
     stop_feat.Destroy()
     return pt_id
 
-def create_segs_shp_file(segs_shp_file_name, delete_existing=False):
+def create_segs_shp_file(segs_shp_file_name, speed_model,
+        delete_existing=False):
     """Creates an empty segments shapefile. Returns the newly created shapefile,
     and the segments layer within it."""
     # OGR doesn't like relative paths
@@ -278,14 +277,9 @@ def create_segs_shp_file(segs_shp_file_name, delete_existing=False):
     field.SetPrecision(15)
     layer.CreateField(field)
     layer.CreateField(field)
-    field = ogr.FieldDefn(SEG_FREE_SPEED_FIELD, ogr.OFTReal)
-    field.SetWidth(24)
-    field.SetPrecision(15)
-    layer.CreateField(field)
-    field = ogr.FieldDefn(SEG_PEAK_SPEED_FIELD, ogr.OFTReal)
-    field.SetWidth(24)
-    field.SetPrecision(15)
-    layer.CreateField(field)
+
+    speed_model.add_extra_needed_speed_fields(layer)
+
     print "... done."
     return segs_shp_file, layer
 
@@ -366,8 +360,10 @@ def add_segment(segs_lyr, seg_id, seg_routes, stop_a_id, stop_b_id,
         stop_name_from_id(stop_b_id, mode_config))
     # Rounding to nearest meter below per convention.
     seg_feat.SetField(SEG_ROUTE_DIST_FIELD, "%.0f" % route_dist_on_seg)
-    seg_feat.SetField(SEG_FREE_SPEED_FIELD, seg_free_speed)
-    seg_feat.SetField(SEG_PEAK_SPEED_FIELD, seg_peak_speed)
+    # TODO: This is a hack for now, need to think of a model to initialise 
+    #  these to zero nicely, or not add till later. 
+    #seg_feat.SetField(SEG_FREE_SPEED_FIELD, seg_free_speed)
+    #seg_feat.SetField(SEG_PEAK_SPEED_FIELD, seg_peak_speed)
     segs_lyr.CreateFeature(seg_feat)
     seg_feat.Destroy()
     seg_geom2.Destroy()

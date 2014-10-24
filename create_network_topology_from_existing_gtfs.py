@@ -16,6 +16,7 @@ import topology_shapefile_data_model as tp_model
 import route_segs
 import mode_timetable_info as m_t_info
 import gtfs_ops
+import seg_speed_models
 from misc_utils import pairs
 
 DELETE_EXISTING = True
@@ -297,11 +298,13 @@ def main():
     schedule = loader.Load()
     print "... done."
 
+    # TODO:- will need a more advanced speed model in future.
+    speed_model = seg_speed_models.PerSegmentPeakOffPeakSpeedModel()
     stops_shp_file, stops_lyr = tp_model.create_stops_shp_file(
         stops_shp_file_name, delete_existing=DELETE_EXISTING)
     stops_multipoint = ogr.Geometry(ogr.wkbMultiPoint)
     segments_shp_file, segments_lyr = tp_model.create_segs_shp_file(
-        segs_shp_file_name, delete_existing=DELETE_EXISTING)
+        segs_shp_file_name, speed_model, delete_existing=DELETE_EXISTING)
 
     line_start_stop_info = None
     if options.line_start_stops:

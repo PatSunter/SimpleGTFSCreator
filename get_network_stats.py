@@ -14,6 +14,7 @@ import topology_shapefile_data_model as tp_model
 import mode_timetable_info as m_t_info
 import route_segs
 import gtfs_ops
+import seg_speed_models
 
 # Length calculations:-
 
@@ -54,7 +55,8 @@ def calc_time_on_route_peak(segs_in_route, segs_lookup_dict):
         seg_id = seg_ref.seg_id
         seg_route_dist_km = route_segs.get_seg_dist_km(seg_ref)
         seg_feat = segs_lookup_dict[seg_id]
-        seg_peak_speed_km_h = seg_feat.GetField(tp_model.SEG_PEAK_SPEED_FIELD)
+        seg_peak_speed_km_h = seg_feat.GetField(
+            seg_speed_models.SEG_PEAK_SPEED_FIELD)
         if seg_peak_speed_km_h <= 0:
             print "Error in calc time on segment id %d - bad speed value of "\
                 "%f km/h encountered." % (seg_id, seg_peak_speed_km_h)
