@@ -11,44 +11,9 @@ import osgeo.ogr
 from osgeo import ogr, osr
 
 import mode_timetable_info as m_t_info
-import topology_shapefile_data_model as tp_model
 import motorway_calcs
 import route_geom_ops
 import seg_speed_models
-
-def ensure_speed_field_exists(route_segments_lyr, speed_field_name):
-    tp_model.ensure_field_exists(route_segments_lyr, speed_field_name,
-        ogr.OFTReal, 24, 15)
-
-def assign_speed_to_seg(route_segments_lyr, route_segment, speed_field_name,
-        speed):
-    route_segment.SetField(speed_field_name, speed)
-    # This SetFeature() call is necessary to actually write the change
-    # back to the layer itself.
-    route_segments_lyr.SetFeature(route_segment)
-
-def assign_speeds(route_segments_shp, mode_config, speed_func,
-        speed_field_name):
-    route_segments_lyr = route_segments_shp.GetLayer(0)
-    ensure_speed_field_exists(route_segments_lyr, speed_field_name)
-
-    segs_total = route_segments_lyr.GetFeatureCount()
-    print "Assigning speed to all %d route segments:" % segs_total
-    one_tenth = segs_total / 10.0
-    segs_since_print = 0
-    for seg_num, route_segment in enumerate(route_segments_lyr):
-        if segs_since_print / one_tenth > 1:
-            print "...assigning to segment number %d ..." % (seg_num)
-            segs_since_print = 0
-        else:
-            segs_since_print += 1
-        speed = speed_func(route_segment, mode_config)
-        assign_speed_to_seg(route_segments_lyr, route_segment,
-            speed_field_name, speed)
-        route_segment.Destroy()    
-    print "...finished assigning speeds to segments."    
-    route_segments_lyr.ResetReading()
-    return
 
 def constant_speed_max(route_segment, mode_config):    
     """Just return constant average speed defined for this mode."""
@@ -58,26 +23,12 @@ def constant_speed_max_peak(route_segment, mode_config):
     """Just return constant average speed defined for this mode, peak hours"""
     return mode_config['avespeed-peak']
 
-def assign_free_speeds_constant(route_segments_shp, mode_config):
-    print "In %s()." % inspect.stack()[0][3]
-    assign_speeds(route_segments_shp, mode_config, constant_speed_max,
-        seg_speed_models.SEG_FREE_SPEED_FIELD)
-    return
-
-def assign_peak_speeds_constant(route_segments_shp, mode_config):
-    print "In %s()." % inspect.stack()[0][3]
-    assign_speeds(route_segments_shp, mode_config, constant_speed_max_peak,
-        seg_speed_models.SEG_PEAK_SPEED_FIELD)
-    return
-
 PEAK_RATIO = 0.5
 def ratio_max_speed(route_segment, mode_config):    
     return mode_config['avespeed'] * PEAK_RATIO
 
-def assign_peak_speeds_portion_free_speed(route_segments_shp, mode_config):
-    print "In %s()." % inspect.stack()[0][3]
-    assign_speeds(route_segments_shp, mode_config, ratio_max_speed,
-        seg_speed_models.SEG_PEAK_SPEED_FIELD)
+def check_mways_status_exists(route_segments_lyr, mode_config):
+    motorway_calcs.ensure_motorway_field_exists(route_segments_lyr)
     return
 
 def constant_speed_offpeak_mway_check(route_segment, mode_config):    
@@ -110,22 +61,6 @@ def buses_peak_with_mway_check(route_segment, mode_config):
         # Apply congestion if on street network
         speed = calc_peak_speed_melb_bus(route_segment, mode_config_bus)
     return speed
-
-def assign_free_speeds_constant_motorway_check(route_segments_shp, mode_config):
-    print "In %s()." % inspect.stack()[0][3]
-    route_segments_lyr = route_segments_shp.GetLayer(0)
-    motorway_calcs.ensure_motorway_field_exists(route_segments_lyr)
-    assign_speeds(route_segments_shp, mode_config,
-        constant_speed_offpeak_mway_check, seg_speed_models.SEG_FREE_SPEED_FIELD)
-    return
-
-def assign_peak_speeds_bus_melb_distance_based_mway_check(route_segments_shp, mode_config):
-    print "In %s()." % inspect.stack()[0][3]
-    route_segments_lyr = route_segments_shp.GetLayer(0)
-    motorway_calcs.ensure_motorway_field_exists(route_segments_lyr)
-    assign_speeds(route_segments_shp, mode_config,
-        buses_peak_with_mway_check, seg_speed_models.SEG_PEAK_SPEED_FIELD)
-    return
 
 # Lat, long of Melbourne's origin in EPSG:4326 (WGS 84 on WGS 84 datum)
 # Cnr of Bourke & Swanston
@@ -176,12 +111,6 @@ def calc_peak_speed_melb_bus(route_segment, mode_config):
     V = peak_speed_func(Z_km)
     return V
 
-def assign_peak_speeds_bus_melb_distance_based(route_segments_shp, mode_config):
-    print "In %s()." % inspect.stack()[0][3]
-    assign_speeds(route_segments_shp, mode_config, calc_peak_speed_melb_bus,
-        seg_speed_models.SEG_PEAK_SPEED_FIELD)
-    return
-
 if __name__ == "__main__":
     parser = OptionParser()
     parser.add_option('--segments', dest='inputsegments', help='Shapefile of line segments.')
@@ -209,15 +138,20 @@ if __name__ == "__main__":
         print "Error, route segments shape file given, %s , failed to open." \
             % (options.inputsegments)
         sys.exit(1)    
+    route_segments_lyr = route_segments_shp.GetLayer(0)
 
-    #assign_free_speeds_constant(route_segments_shp, mode_config)
-    #assign_peak_speeds_constant(route_segments_shp, mode_config)
+    speed_model = seg_speed_models.PerSegmentPeakOffPeakSpeedModel()
 
-    #assign_peak_speeds_bus_melb_distance_based(route_segments_shp, mode_config)
+    speed_model.assign_speeds_to_all_segments(route_segments_lyr, mode_config,
+        None, constant_speed_max, constant_speed_max_peak)
+
+    #speed_model.assign_speeds_to_all_segments(route_segments_lyr, mode_config,
+    #    None, constant_speed_max, calc_peak_speed_melb_bus)
 
     # These two functions require you've first update the motorway status ...
-    assign_free_speeds_constant_motorway_check(route_segments_shp, mode_config)
-    assign_peak_speeds_bus_melb_distance_based_mway_check(route_segments_shp, mode_config)
+    #speed_model.assign_speeds_to_all_segments(route_segments_lyr, mode_config,
+    #    check_mways_status_exists, constant_speed_offpeak_mway_check,
+    #    buses_peak_with_mway_check)
 
     # Close the shape files - includes making sure it writes
     route_segments_shp.Destroy()
