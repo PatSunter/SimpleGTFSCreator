@@ -111,10 +111,24 @@ def calc_peak_speed_melb_bus(route_segment, mode_config):
     V = peak_speed_func(Z_km)
     return V
 
+SPEED_FUNC_SETS_REGISTER = {
+    "constant_peak_offpeak": (None, constant_speed_max, \
+        constant_speed_max_peak),
+    "peak_speed_dist_based": (None, constant_speed_max, \
+        calc_peak_speed_melb_bus), 
+    "peak_speed_dist_based_mways_check": (check_mways_status_exists, 
+        constant_speed_offpeak_mway_check,
+        buses_peak_with_mway_check),
+    }
+
 if __name__ == "__main__":
     parser = OptionParser()
-    parser.add_option('--segments', dest='inputsegments', help='Shapefile of line segments.')
-    parser.add_option('--service', dest='service', help="Should be 'train', 'tram' or 'bus'.")
+    parser.add_option('--segments', dest='inputsegments', help="Shapefile of "\
+        "line segments.")
+    parser.add_option('--service', dest='service', help="Should be 'train', "\
+        "'tram' or 'bus'.")
+    parser.add_option('--speed_funcs', dest='speed_funcs', help="Name in "\
+        "register of speed functions to use.")
     (options, args) = parser.parse_args()
 
     if options.inputsegments is None:
@@ -128,8 +142,16 @@ if __name__ == "__main__":
         parser.print_help()
         parser.error("Service option requested '%s' not in allowed set, of %s" \
             % (options.service, m_t_info.settings.keys()))
+    if options.speed_funcs is None \
+            or options.speed_funcs not in SPEED_FUNC_SETS_REGISTER.keys():
+        parser.print_help()
+        parser.error("No speed_funcs option requested or bad option given. "
+            "Allowed choice of speed_funcs is %s" \
+            % (sorted(SPEED_FUNC_SETS_REGISTER.keys())))
         
     mode_config = m_t_info.settings[options.service]
+    check_func, offpeak_func, peak_func = \
+        SPEED_FUNC_SETS_REGISTER[options.speed_funcs]
 
     # Open in write-able mode, hence the 1 below.
     fname = os.path.expanduser(options.inputsegments)
@@ -140,13 +162,11 @@ if __name__ == "__main__":
         sys.exit(1)    
     route_segments_lyr = route_segments_shp.GetLayer(0)
 
+    print "About to assign speeds to segments per functions defined in "\
+        "Register under name '%s'" % options.speed_funcs
     speed_model = seg_speed_models.PerSegmentPeakOffPeakSpeedModel()
-
     speed_model.assign_speeds_to_all_segments(route_segments_lyr, mode_config,
-        None, constant_speed_max, constant_speed_max_peak)
-
-    #speed_model.assign_speeds_to_all_segments(route_segments_lyr, mode_config,
-    #    None, constant_speed_max, calc_peak_speed_melb_bus)
+        check_func, offpeak_func, peak_func)
 
     # These two functions require you've first update the motorway status ...
     #speed_model.assign_speeds_to_all_segments(route_segments_lyr, mode_config,
