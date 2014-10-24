@@ -168,11 +168,6 @@ if __name__ == "__main__":
     speed_model.assign_speeds_to_all_segments(route_segments_lyr, mode_config,
         check_func, offpeak_func, peak_func)
 
-    # These two functions require you've first update the motorway status ...
-    #speed_model.assign_speeds_to_all_segments(route_segments_lyr, mode_config,
-    #    check_mways_status_exists, constant_speed_offpeak_mway_check,
-    #    buses_peak_with_mway_check)
-
     # Close the shape files - includes making sure it writes
     route_segments_shp.Destroy()
     route_segments_shp = None
