@@ -44,10 +44,11 @@ class Seq_Stop_Info:
         #  any extra info about speed on this segment needed.
         self.extra_speed_info = None
 
-    def save_seq_stop_info(self, next_segment, stops_lyr, speed_model):
+    def save_seq_stop_info(self, next_segment, stops_lyr, serv_period,
+            travel_dir, speed_model):
         self.dist_km_to_next = tp_model.get_distance_km(next_segment)
         self.extra_speed_info = speed_model.save_extra_seg_speed_info(
-            next_segment, stops_lyr)
+            next_segment, serv_period, travel_dir)
 
     def calc_time_on_next_segment(self, speed_model, mode_config, curr_time,
             peak_status):
@@ -60,7 +61,7 @@ class Seq_Stop_Info:
         # Need to round this to nearest second and return as a timedelta.
         return timedelta(seconds=round(time_hrs * 3600))
  
-def build_stop_list_and_seg_info_along_route(route_def, dir_id,
+def build_stop_list_and_seg_info_along_route(route_def, serv_period, dir_id,
         route_segments_shp, stops_shp, mode_config, schedule, seg_speed_model,
         stop_id_to_gtfs_stop_id_map):
 
@@ -71,6 +72,9 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id,
         return []
     route_segments_lyr = route_segments_shp.GetLayer(0)
     stops_lyr = stops_shp.GetLayer(0)
+
+    seg_speed_model.setup_for_route(route_def)
+
     # Apply a filter to speed up calculations - only segments on this route.
     where_clause = "%s LIKE '%%%s' OR %s LIKE '%%%s,%%'" % \
         (tp_model.SEG_ROUTE_LIST_FIELD, route_def.id,\
@@ -102,7 +106,8 @@ def build_stop_list_and_seg_info_along_route(route_def, dir_id,
                 "%d." % (segment_id)
             sys.exit(1)    
         s_info = Seq_Stop_Info(first_stop)
-        s_info.save_seq_stop_info(seg_feature, stops_lyr, seg_speed_model)
+        s_info.save_seq_stop_info(seg_feature, stops_lyr, serv_period, dir_id,
+            seg_speed_model)
         prebuilt_stop_info_list.append(s_info)
 
     # Now we've exited from the loop :- we need to now add info for
@@ -263,15 +268,6 @@ def create_gtfs_trips_stoptimes_for_route(route_def, route_segments_shp,
     # 2 vehicles needed to service each route.
     for dir_id, direction in enumerate(route_def.dir_names):
         headsign = direction
-        # Pre-calculate the stops list and save relevant info related to 
-        # speed calculation from shapefiles for later.
-        # as this is a moderately expensive operation.
-        # This way we do this just once per route and direction.
-        prebuilt_stop_info_list = build_stop_list_and_seg_info_along_route(
-            route_def, dir_id, route_segments_shp, stops_shp,
-            mode_config, schedule, seg_speed_model,
-            stop_id_to_gtfs_stop_id_map)
-        
         # N.B.: Possible we might want to convert
         # the services_info of headway periods to a configurable per-route 
         # later rather than per mode...
@@ -283,6 +279,15 @@ def create_gtfs_trips_stoptimes_for_route(route_def, route_segments_shp,
             except KeyError:    
                 gtfs_period = add_service_period(serv_period, schedule)
 
+            # Pre-calculate the stops list and save relevant info related to 
+            # speed calculation from shapefiles for later.
+            # as this is a moderately expensive operation.
+            # This way we do this just once per route, direction, and serv period.
+            prebuilt_stop_info_list = build_stop_list_and_seg_info_along_route(
+                route_def, serv_period, dir_id, route_segments_shp, stops_shp,
+                mode_config, schedule, seg_speed_model,
+                stop_id_to_gtfs_stop_id_map)
+        
             curr_period = 0    
             while curr_period < len(serv_headways):
                 curr_period_inc = timedelta(0)
@@ -410,7 +415,7 @@ def get_partial_save_name(output_fname, ii):
     return fname
 
 def process_data(route_defs_csv_fname, input_segments_fname,
-        input_stops_fname, mode_config, output, use_seg_speeds,
+        input_stops_fname, mode_config, output, seg_speed_model,
         memory_db):
     # Now see if we can open both needed shape files correctly
     route_defs = route_segs.read_route_defs(route_defs_csv_fname)
@@ -424,11 +429,10 @@ def process_data(route_defs_csv_fname, input_segments_fname,
         print "Error, stops shape file given, %s , failed to open." \
             % (input_stops_fname)
         sys.exit(1)
+    segs_layer = route_segments_shp.GetLayer(0)
+    stops_layer = stops_shp.GetLayer(0)
 
-    if use_seg_speeds:
-        seg_speed_model = seg_speed_models.PerSegmentPeakOffPeakSpeedModel()
-    else:
-        seg_speed_model = seg_speed_models.ConstantSpeedPerModeModel()
+    seg_speed_model.setup(route_defs, segs_layer, stops_layer)
 
     partial_save_files = []
     trips_total = 0
@@ -515,11 +519,13 @@ if __name__ == "__main__":
     parser.add_option('--usesegspeeds', dest='usesegspeeds', 
         help='Use per-segment speeds defined in route segments shapefile? '\
             'If false, then will just use a constant speed defined per mode.')
+    parser.add_option('--gtfs_fname_for_speeds', dest='gtfs_fname_for_speeds',
+        help='Path to GTFS input file to use for speeds. Should end in .zip')
     parser.add_option('--memorydb', dest='memorydb', 
         help='Should the GTFS schedule use an in-memory DB, or file based '\
             'one? Creating large GTFS schedules can be memory-hungry.')
     parser.set_defaults(output='google_transit.zip', usesegspeeds='True',
-        memorydb='True')
+        gtfs_fname_for_speeds='', memorydb='True')
     (options, args) = parser.parse_args()
 
     if options.routedefs is None:
@@ -539,11 +545,39 @@ if __name__ == "__main__":
         parser.print_help()
         parser.error("Service option requested '%s' not in allowed set, of %s" \
             % (options.service, allowedServs))
+    gtfs_fname_for_speeds = options.gtfs_fname_for_speeds
 
     use_seg_speeds = parser_utils.str2bool(options.usesegspeeds)
+    use_gtfs_speeds = False
+    if gtfs_fname_for_speeds:
+        use_gtfs_speeds = True
+        # Override
+        use_seg_speeds = False
+
     memory_db = parser_utils.str2bool(options.memorydb)
 
     mode_config = m_t_info.settings[options.service]
+
+    seg_speed_model = None
+    if use_gtfs_speeds:
+        time_periods = [
+            (timedelta(hours=00,minutes=00), timedelta(hours=04,minutes=00)),
+            (timedelta(hours=04,minutes=00), timedelta(hours=06,minutes=00)),
+            (timedelta(hours=06,minutes=00), timedelta(hours=07,minutes=30)),
+            (timedelta(hours=07,minutes=30), timedelta(hours=10,minutes=00)),
+            (timedelta(hours=10,minutes=00), timedelta(hours=16,minutes=00)),
+            (timedelta(hours=16,minutes=00), timedelta(hours=18,minutes=30)),
+            (timedelta(hours=18,minutes=30), timedelta(hours=21,minutes=30)),
+            (timedelta(hours=21,minutes=30), timedelta(hours=24,minutes=30)),
+            (timedelta(hours=24,minutes=30), timedelta(hours=28,minutes=00)),
+            ]
+        seg_speed_model = \
+            seg_speed_models.MultipleTimePeriodsPerRouteSpeedModel(
+                time_periods, gtfs_fname_for_speeds)    
+    elif use_seg_speeds:
+        seg_speed_model = seg_speed_models.PerSegmentPeakOffPeakSpeedModel()
+    else:
+        seg_speed_model = seg_speed_models.ConstantSpeedPerModeModel()
 
     process_data(
         os.path.expanduser(options.routedefs),
@@ -551,5 +585,5 @@ if __name__ == "__main__":
         os.path.expanduser(options.inputstops),
         mode_config,
         os.path.expanduser(options.output),
-        use_seg_speeds,
+        seg_speed_model,
         memory_db)

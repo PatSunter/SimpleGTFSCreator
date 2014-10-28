@@ -33,7 +33,8 @@ def add_all_stops_from_gtfs(schedule, stops_lyr, stops_multipoint):
         stop_pt = ogr.Geometry(ogr.wkbPoint)
         stop_pt.AddPoint(gtfs_stop.stop_lon, gtfs_stop.stop_lat)
         stop_id = tp_model.add_stop(stops_lyr, stops_multipoint,
-            tp_model.STOP_TYPE_FROM_EXISTING_GTFS, stop_pt, gtfs_srs)
+            tp_model.STOP_TYPE_FROM_EXISTING_GTFS, stop_pt, gtfs_srs,
+            gtfs_id=gtfs_stop.stop_id)
         gtfs_stop_id_to_stop_id_map[gtfs_stop.stop_id] = stop_id    
         stop_count += 1
     print "...done adding the %d stops." % stop_count
@@ -56,17 +57,16 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id, r_id,
     route_dir_serv_period_pairs = \
         gtfs_ops.extract_route_dir_serv_period_tuples(trip_dict)
     # The use of set() will remove duplicates
-    route_dirs = list(set(map(operator.itemgetter(0),
+    input_route_dirs = list(set(map(operator.itemgetter(0),
         route_dir_serv_period_pairs)))
     # Some routes have >2 headsigns (e.g. that finish mid-way along
     # route in certain trips.
     #assert len(route_dirs) == 2
-    master_dir = route_dirs[0]
+    master_dir = input_route_dirs[0]
 
     print 'Calculating full-stop pattern of segments for route id %s, "%s":' \
         % (gtfs_route.route_id, gtfs_ops.get_route_print_name(gtfs_route))
-    for p_ii, p_key in enumerate(p_keys):
-        trips = trip_dict[p_keys[p_ii]]
+    for trips in trip_dict.itervalues():
         # According to the API, all of these trips in this trip pattern
         # have the same stop pattern. So just look at first one here.
         stop_visit_pattern = trips[0].GetPattern()
@@ -95,10 +95,10 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id, r_id,
     full_stop_pattern_segs = route_segs.get_full_stop_pattern_segs(
         all_pattern_segments, seg_links, route_first_stop_id)
 
-    # Now calculate direction names, based on first and last stops.
     stop_id_to_gtfs_stop_id_map = {}        
     for gtfs_stop_id, stop_id in gtfs_stop_id_to_stop_id_map.iteritems():
         stop_id_to_gtfs_stop_id_map[stop_id] = gtfs_stop_id
+    # Now calculate direction names, based on first and last stops.
     if len(full_stop_pattern_segs) == 1:
         first_stop_id = full_stop_pattern_segs[0].first_id
         last_stop_id = full_stop_pattern_segs[0].second_id
@@ -109,11 +109,37 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id, r_id,
             full_stop_pattern_segs[-1], full_stop_pattern_segs[-2])
     first_stop_id_gtfs = stop_id_to_gtfs_stop_id_map[first_stop_id]
     last_stop_id_gtfs = stop_id_to_gtfs_stop_id_map[last_stop_id]
-    first_stop_name = schedule.stops[first_stop_id_gtfs].stop_name
-    last_stop_name = schedule.stops[last_stop_id_gtfs].stop_name
-    route_dirs = (last_stop_name, first_stop_name)
-
-    return full_stop_pattern_segs, route_dirs
+    # Ok :- we now need to find a pattern which starts with each of these
+    #   stops, and use that to save the directions.
+    #first_stop_name = schedule.stops[first_stop_id_gtfs].stop_name
+    #last_stop_name = schedule.stops[last_stop_id_gtfs].stop_name
+    #output_route_dirs = (last_stop_name, first_stop_name)
+    first_stop_dir = None
+    last_stop_dir = None
+    min_dist_from_trip_end = sys.maxint
+    for trips in trip_dict.itervalues():
+        stop_visit_pattern = trips[0].GetPattern()
+        trip_stop_ids = map(operator.attrgetter('stop_id'),
+            stop_visit_pattern)
+        len_trip = len(trip_stop_ids)
+        try:
+            last_stop_index = trip_stop_ids.index(last_stop_id_gtfs)
+        except ValueError:
+            continue
+        dist_from_trip_end = len(trip_stop_ids) - last_stop_index - 1
+        if dist_from_trip_end < min_dist_from_trip_end:
+            min_dist_from_trip_end = dist_from_trip_end
+            last_stop_dir = trips[0].trip_headsign
+        if dist_from_trip_end == 0:
+            break
+    assert last_stop_dir is not None
+    for route_dir in input_route_dirs:
+        if route_dir != last_stop_dir:
+            first_stop_dir = route_dir
+            break
+    assert first_stop_dir is not None        
+    output_route_dirs = (last_stop_dir, first_stop_dir)
+    return full_stop_pattern_segs, output_route_dirs
 
 def get_gtfs_route_ids_in_output_order(routes_dict):
     gtfs_route_id_output_order = []
@@ -157,7 +183,8 @@ def get_route_defs_and_segments_from_gtfs(schedule, segments_lyr,
                     "info, '%s', of type '%s', not found in schedule. "\
                     "Skipping." % (rname, r_name_type)
                 continue
-            gtfs_stop_id, s_info = gtfs_ops.getStopWithName(schedule, stop_name)
+            gtfs_stop_id, s_info = gtfs_ops.getStopWithName(schedule,
+                stop_name)
             if gtfs_stop_id is None:
                 print "Warning:- stop name specified in line start stop "\
                     "info, '%s', for route '%s', not found in schedule. "\
@@ -206,9 +233,10 @@ def get_route_defs_and_segments_from_gtfs(schedule, segments_lyr,
             route_segs.add_update_seg_ref(seg.first_id, seg.second_id,
                 r_id, seg.route_dist_on_seg, segs_all_routes,
                 updated_segs_this_route)
+        seg_ids = map(operator.attrgetter('seg_id'), updated_segs_this_route)
         route_def = route_segs.Route_Def(r_id, r_short_name, r_long_name, 
-            all_route_dirs[gtfs_route_id],
-            map(operator.attrgetter('seg_id'), updated_segs_this_route))
+            all_route_dirs[gtfs_route_id], seg_ids,
+            gtfs_origin_id=gtfs_route_id)
         route_defs.append(route_def)
 
     return route_defs, segs_all_routes
@@ -301,7 +329,8 @@ def main():
     # TODO:- will need a more advanced speed model in future.
     speed_model = seg_speed_models.PerSegmentPeakOffPeakSpeedModel()
     stops_shp_file, stops_lyr = tp_model.create_stops_shp_file(
-        stops_shp_file_name, delete_existing=DELETE_EXISTING)
+        stops_shp_file_name, delete_existing=DELETE_EXISTING,
+        gtfs_origin_field=True)
     stops_multipoint = ogr.Geometry(ogr.wkbMultiPoint)
     segments_shp_file, segments_lyr = tp_model.create_segs_shp_file(
         segs_shp_file_name, speed_model, delete_existing=DELETE_EXISTING)
