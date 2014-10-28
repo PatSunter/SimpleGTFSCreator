@@ -46,8 +46,9 @@ def get_route_names_sorted(route_names):
 
 class Route_Def:
     def __init__(self, route_id, short_name, long_name, dir_names,
-            ordered_seg_ids):
+            ordered_seg_ids, gtfs_origin_id = None):
         self.id = route_id
+        self.gtfs_origin_id = gtfs_origin_id
         self.short_name = short_name
         self.long_name = long_name
         self.dir_names = dir_names
@@ -813,11 +814,11 @@ def write_segments_to_shp_file(segments_lyr, input_stops_lyr, seg_refs,
 # I/O from route definition CSV
 
 # Old (Pre 15 Oct 2014) headers of route_defs.csv
-# ['Route', 'dir1', 'dir2', 'Segments'])
+ROUTE_CSV_HEADERS_00 = ['Route', 'dir1', 'dir2', 'Segments']
 
 # New headers:
-# ['route_id', 'route_short_name', 'route_long_name',
-#    'dir1', 'dir2', 'Segments'])
+ROUTE_CSV_HEADERS_01 = ['route_id', 'route_short_name', 'route_long_name',
+    'gtfs_id', 'dir1', 'dir2', 'Segments']
 
 def read_route_defs(csv_file_name, do_sort=True):
     """Reads a CSV of route_defs, into a list of 'route_defs'.
@@ -833,48 +834,52 @@ def read_route_defs(csv_file_name, do_sort=True):
             % (csv_file_name)
         sys.exit(1) 
 
-    reader = csv.reader(csv_file, delimiter=';', quotechar="'") 
-    # skip headings
-    headers = reader.next()
-    # Deal with old and new formats
-    if headers[0] == 'Route':
+    dict_reader = csv.DictReader(csv_file, delimiter=';', quotechar="'") 
+
+    # Check old vs new format
+    if 'Route' in dict_reader.fieldnames:
         format_version = "00"
     else:
         format_version = "01"
-    for ii, row in enumerate(reader):
+
+    for ii, row in enumerate(dict_reader):
         if format_version == "00":
             r_id = ii
-            r_short_name = row[0]
+            r_short_name = row['Route']
             r_long_name = None
-            dir1 = row[1]
-            dir2 = row[2]
-            segments_str = row[3].split(',')
         else:
-            r_id = row[0]
-            r_short_name = row[1]
+            r_id = row['route_id']
+            r_short_name = row['route_short_name']
             if r_short_name == 'None' or len(r_short_name) == 0:
                 r_short_name = None
-            r_long_name = row[2]
+            r_long_name = row['route_long_name']
             if r_long_name == 'None' or len(r_long_name) == 0:
                 r_long_name = None
             assert r_short_name or r_long_name
-            dir1 = row[3]
-            dir2 = row[4]
-            segments_str = row[5].split(',')
+            
+        try:
+            r_gtfs_id = row['gtfs_id']
+            if r_gtfs_id == 'None' or len(r_gtfs_id) == 0:
+                r_gtfs_id = None
+        except KeyError:
+            r_gtfs_id = None
+        dir1 = row['dir1']
+        dir2 = row['dir2']
+        segments_str = row['Segments'].split(',')
+
         seg_ids = [int(segstr) for segstr in segments_str]
         route_def = Route_Def(r_id, r_short_name, r_long_name,
-            (dir1, dir2), seg_ids)
+            (dir1, dir2), seg_ids, gtfs_origin_id=r_gtfs_id)
         route_defs.append(route_def)
     if do_sort == True:
-        route_defs.sort(key=get_route_order_key_from_name)        
+        route_defs.sort(key=get_route_order_key_from_name)
     csv_file.close()
     return route_defs
 
 def write_route_defs(csv_file_name, route_defs):
     routesfile = open(csv_file_name, 'w')
     rwriter = csv.writer(routesfile, delimiter=';')
-    rwriter.writerow(['route_id', 'route_short_name', 'route_long_name',
-        'dir1', 'dir2', 'Segments'])
+    rwriter.writerow(ROUTE_CSV_HEADERS_01)
 
     for rdef in route_defs:
         dirs = tuple(rdef.dir_names)
@@ -889,7 +894,7 @@ def write_route_defs(csv_file_name, route_defs):
             
         seg_str_all = ','.join(map(str, rdef.ordered_seg_ids))
         rwriter.writerow([rdef.id, rdef.short_name, rdef.long_name,
-            dirs[0], dirs[1], seg_str_all])
+            rdef.gtfs_origin_id, dirs[0], dirs[1], seg_str_all])
 
     routesfile.close()
     print "Wrote output to %s" % (csv_file_name)
