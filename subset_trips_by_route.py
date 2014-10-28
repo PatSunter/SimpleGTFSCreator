@@ -51,8 +51,8 @@ def get_single_route_def_list(route_short_names, route_long_names,
     single_route_def_list = []
     for short_name in route_short_names:
         r_def = route_segs.Route_Def(None, short_name, None, (None, None), None)
-        if True not in [route_segs.route_defs_match_statuses(r_def, r_def2) for \
-                r_def2 in single_route_def_list]:
+        if True not in [route_segs.route_defs_match_statuses(r_def, r_def2) \
+            for r_def2 in single_route_def_list]:
             single_route_def_list.append(r_def)
         else:
             print "Warning:- you already asked to copy route with "\
@@ -60,8 +60,8 @@ def get_single_route_def_list(route_short_names, route_long_names,
                     % (str(r_def.id), route_segs.get_print_name(r_def))
     for long_name in route_long_names:    
         r_def = route_segs.Route_Def(None, None, long_name, (None, None), None)    
-        if True not in [route_segs.route_defs_match_statuses(r_def, r_def2) for \
-                r_def2 in single_route_def_list]:
+        if True not in [route_segs.route_defs_match_statuses(r_def, r_def2) \
+            for r_def2 in single_route_def_list]:
             single_route_def_list.append(r_def)
         else:
             print "Warning:- you already asked to copy route with "\
