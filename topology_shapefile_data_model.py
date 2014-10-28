@@ -27,6 +27,7 @@ STOP_LYR_NAME = "stops"
 STOP_ID_FIELD = "gid"               # int, 10
 STOP_NAME_FIELD = "ID"              # int, 10
 STOP_TYPE_FIELD = "typ"             # str, 50 - reasonable length type strs.
+STOP_GTFS_ID_FIELD = "gtfs_id"      # int, 10
 
 ON_MOTORWAY_FIELD = 'mway'
 
@@ -124,6 +125,21 @@ def build_segs_lookup_table(route_segments_lyr):
     route_segments_lyr.ResetReading()
     return lookup_dict
 
+def build_stop_id_to_gtfs_stop_id_map(stops_lyr):
+    lyr_defn = stops_lyr.GetLayerDefn()
+    field_exists, field_i = check_field_exists(lyr_defn, STOP_GTFS_ID_FIELD)
+    if not field_exists:
+        raise ValueError("Can't build stop ID to GTFS ID map for a "\
+            "stops layer that doesn't include a GTFS ID field.")
+    stop_id_to_gtfs_id_map = {}
+    # Build mapping of osstip route id to gtfs route id
+    for stop in stops_lyr:
+        stop_id = stop.GetField(STOP_ID_FIELD)
+        gtfs_id = stop.GetField(STOP_GTFS_ID_FIELD)
+        stop_id_to_gtfs_id_map[stop_id] = gtfs_id
+    stops_lyr.ResetReading()
+    return stop_id_to_gtfs_id_map
+
 ###########################################################
 # Access functions for key properties of segment-stop info
 
@@ -174,7 +190,8 @@ def get_route_segment(segment_id, route_segments_lyr):
 ################
 # Section below related to adding stops, routes, segments to shapefiles.
 
-def create_stops_shp_file(stops_shp_file_name, delete_existing=False):
+def create_stops_shp_file(stops_shp_file_name, delete_existing=False,
+        gtfs_origin_field=False):
     """Creates an empty stops shapefile. Returns the newly created shapefile,
     and the stops layer within it."""
     # OGR doesn't like relative paths
@@ -205,10 +222,13 @@ def create_stops_shp_file(stops_shp_file_name, delete_existing=False):
     field = ogr.FieldDefn(STOP_TYPE_FIELD, ogr.OFTString)
     field.SetWidth(50)
     layer.CreateField(field)
+    if gtfs_origin_field:
+        layer.CreateField(ogr.FieldDefn(STOP_GTFS_ID_FIELD, ogr.OFTInteger))
     print "... done."
     return stops_shp_file, layer
 
-def add_stop(stops_lyr, stops_multipoint, stop_type, stop_geom, src_srs):
+def add_stop(stops_lyr, stops_multipoint, stop_type, stop_geom, src_srs,
+        gtfs_id=None):
     """Adds a stop to stops_lyr, and also its geometry to stops_multipoint. 
     In the case of stops_lyr, the new stops' geometry will be re-projected into
     the SRS of that layer before adding (hence need to pass srs_srs as an
@@ -232,6 +252,8 @@ def add_stop(stops_lyr, stops_multipoint, stop_type, stop_geom, src_srs):
     stop_feat.SetField(STOP_ID_FIELD, pt_id)
     stop_feat.SetField(STOP_NAME_FIELD, pt_id)
     stop_feat.SetField(STOP_TYPE_FIELD, stop_type)
+    if gtfs_id is not None:
+        stop_feat.SetField(STOP_GTFS_ID_FIELD, int(gtfs_id))
     stops_lyr.CreateFeature(stop_feat)
     stop_feat.Destroy()
     return pt_id
@@ -360,10 +382,6 @@ def add_segment(segs_lyr, seg_id, seg_routes, stop_a_id, stop_b_id,
         stop_name_from_id(stop_b_id, mode_config))
     # Rounding to nearest meter below per convention.
     seg_feat.SetField(SEG_ROUTE_DIST_FIELD, "%.0f" % route_dist_on_seg)
-    # TODO: This is a hack for now, need to think of a model to initialise 
-    #  these to zero nicely, or not add till later. 
-    #seg_feat.SetField(SEG_FREE_SPEED_FIELD, seg_free_speed)
-    #seg_feat.SetField(SEG_PEAK_SPEED_FIELD, seg_peak_speed)
     segs_lyr.CreateFeature(seg_feat)
     seg_feat.Destroy()
     seg_geom2.Destroy()
