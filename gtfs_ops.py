@@ -11,6 +11,7 @@ import operator
 import copy
 from datetime import time, datetime, date, timedelta
 import csv
+import math
 
 import transitfeed
 from osgeo import ogr, osr
@@ -48,7 +49,8 @@ def tdToSecs(td):
     return secs
 
 def tdToHours(td):
-    return tdToSecs(td) / SECS_PER_HOUR
+    return tdToSecs(td) / float(SECS_PER_HOUR)
+
 # Utility printing functions
 
 def printAllStopNamesInTrip(trip):    
@@ -419,8 +421,8 @@ def calc_speed_on_segment_with_nearby_segs(trip_stop_time_pairs,
     seg_trav_time_s = s_arr_time_pair[1] - s_arr_time_pair[0]
     assert seg_trav_time_s >= (0.0 - 1e-6)
 
-    print "In speed smoothing func:- initial seg is %d, dist %.1fm,"\
-        " time %.1f sec." % (stop_pair_i, seg_dist_m, seg_trav_time_s)
+    #print "In speed smoothing func:- initial seg is %d, dist %.1fm,"\
+    #    " time %.1f sec." % (stop_pair_i, seg_dist_m, seg_trav_time_s)
 
     # Now, we have to keep adding segment speeds and times, till we reach
     #  the min dist to calculate speed over.
@@ -449,7 +451,7 @@ def calc_speed_on_segment_with_nearby_segs(trip_stop_time_pairs,
                 move_magnitude += 1
                 continue
 
-        print "...adding time and dist for seg %d..." % seg_i_to_add
+        #print "...adding time and dist for seg %d..." % seg_i_to_add
         stop_time_pair = trip_stop_time_pairs[seg_i_to_add]
         new_s_id_pair = (stop_time_pair[0].stop.stop_id, \
             stop_time_pair[1].stop.stop_id)
@@ -470,14 +472,14 @@ def calc_speed_on_segment_with_nearby_segs(trip_stop_time_pairs,
         if go_forward_next:
             move_magnitude += 1
         
-    print "...for speed calc, total dist is %.1f m, total time %.1f s" % \
-        (speed_calc_total_dist_m, speed_calc_total_time_s)
+    #print "...for speed calc, total dist is %.1f m, total time %.1f s" % \
+    #    (speed_calc_total_dist_m, speed_calc_total_time_s)
     # use a function here to handle units, special cases (e.g.
     # where dist or time = 0)
     smoothed_seg_speed_km_h = calc_seg_speed_km_h(speed_calc_total_dist_m,
         speed_calc_total_time_s)
-    print "...thus speed calculated as %.2f km/h" % \
-        (smoothed_seg_speed_km_h)
+    #print "...thus speed calculated as %.2f km/h" % \
+    #    (smoothed_seg_speed_km_h)
     return smoothed_seg_speed_km_h
 
 def build_segment_speeds_by_dir_serv_period(trip_dict, p_keys,
@@ -539,20 +541,28 @@ def build_segment_speeds_by_dir_serv_period(trip_dict, p_keys,
 
     return all_patterns_stop_visit_times, seg_distances
 
-def calc_avg_speeds_during_time_periods(schedule, seg_speeds_dict, time_periods):
+def calc_avg_speeds_during_time_periods(schedule, seg_speeds_dict,
+        time_periods, sort_seg_stop_id_pairs=False):
     """Note:- assumes and requires that the seg_speeds_dict is already in
     sorted order."""
     
     speeds_in_periods = {}
     for s_id_pair, seg_speed_tuples in seg_speeds_dict.iteritems():
-        speeds_in_periods[s_id_pair] = [[] for ii in range(len(time_periods))]
+        if sort_seg_stop_id_pairs:
+            out_s_id_pair = tuple(sorted(s_id_pair))
+        else:
+            out_s_id_pair = s_id_pair
+        speeds_in_periods[out_s_id_pair] = \
+            [[] for dummy in xrange(len(time_periods))]
         curr_period_i = 0
         p_start, p_end = time_periods[0]
         pstart_sec = tdToSecs(p_start)
         pend_sec = tdToSecs(p_end)
         for pt_a_time, pt_b_time, seg_speed_km_h in seg_speed_tuples:
             if pt_a_time >= pstart_sec and pt_a_time <= pend_sec:
-                speeds_in_periods[s_id_pair][curr_period_i].append(seg_speed_km_h)
+                spds_in_period = \
+                    speeds_in_periods[out_s_id_pair][curr_period_i]
+                spds_in_period.append(seg_speed_km_h)
             else:
                 curr_period_i += 1
                 if curr_period_i >= len(time_periods):
@@ -564,25 +574,29 @@ def calc_avg_speeds_during_time_periods(schedule, seg_speeds_dict, time_periods)
                     pstart_sec = tdToSecs(p_start)
                     pend_sec = tdToSecs(p_end)
                     if pt_a_time >= pstart_sec and pt_a_time <= pend_sec:
-                        speeds_in_periods[s_id_pair][curr_period_i].append(\
-                            seg_speed_km_h)
+                        spds_in_period = \
+                            speeds_in_periods[out_s_id_pair][curr_period_i]
+                        spds_in_period.append(seg_speed_km_h)
                         break
                     curr_period_i += 1
-
     avg_speeds = {}
     speed_min_maxes = {}
     for s_id_pair in seg_speeds_dict.iterkeys():
-        avg_speeds[s_id_pair] = []
-        speed_min_maxes[s_id_pair] = []
+        if sort_seg_stop_id_pairs:
+            out_s_id_pair = tuple(sorted(s_id_pair))
+        else:
+            out_s_id_pair = s_id_pair
+        avg_speeds[out_s_id_pair] = []
+        speed_min_maxes[out_s_id_pair] = []
         for period_i in range(len(time_periods)):
-            s_in_p = speeds_in_periods[s_id_pair][period_i]
+            s_in_p = speeds_in_periods[out_s_id_pair][period_i]
             if len(s_in_p) == 0:
-                avg_speeds[s_id_pair].append(-1)
-                speed_min_maxes[s_id_pair].append(None)
+                avg_speeds[out_s_id_pair].append(-1)
+                speed_min_maxes[out_s_id_pair].append(None)
             else:
                 avg_speed_in_p = sum(s_in_p) / float(len(s_in_p))
-                avg_speeds[s_id_pair].append(avg_speed_in_p)
-                speed_min_maxes[s_id_pair].append(
+                avg_speeds[out_s_id_pair].append(avg_speed_in_p)
+                speed_min_maxes[out_s_id_pair].append(
                     (min(s_in_p), max(s_in_p)))
     return avg_speeds
 
@@ -622,10 +636,10 @@ def print_trip_start_times_for_patterns(trip_patterns_dict):
 def extract_route_speed_info_by_time_periods(schedule, gtfs_route_id,
         time_periods, 
         min_dist_for_speed_calc_m=0,
-        min_time_for_speed_calc_s=60):
+        min_time_for_speed_calc_s=60,
+        sort_seg_stop_id_pairs=False):
     """Note: See doc for function extract_route_freq_info_by_time_periods()
     for explanation of time_periods argument format."""
-
     gtfs_route = schedule.routes[gtfs_route_id]
     trip_dict = gtfs_route.GetPatternIdTripDict()
     p_keys = trip_dict.keys()
@@ -645,7 +659,7 @@ def extract_route_speed_info_by_time_periods(schedule, gtfs_route_id,
             all_patterns_entry = \
                 all_patterns_segment_speed_infos[dir_period_pair]
             avg_speeds = calc_avg_speeds_during_time_periods(schedule,
-                all_patterns_entry, time_periods)
+                all_patterns_entry, time_periods, sort_seg_stop_id_pairs)
             route_avg_speeds_during_time_periods[dir_period_pair] = avg_speeds
     return route_avg_speeds_during_time_periods, seg_distances
 
@@ -719,9 +733,14 @@ def extract_route_freq_info_by_time_periods_all_patterns(schedule,
 def get_time_period_name_strings(periods):
     period_names = []
     for p0, p1 in periods:
-        p0t = tdToTimeOfDay(p0)
-        p1t = tdToTimeOfDay(p1)
-        pname = "%s-%s" % (p0t.strftime('%H_%M'), p1t.strftime('%H_%M'))
+        #p0t = tdToTimeOfDay(p0)
+        #p1t = tdToTimeOfDay(p1)
+        #pname = "%s-%s" % (p0t.strftime('%H_%M'), p1t.strftime('%H_%M'))
+        p0h = math.floor(tdToHours(p0))
+        p0m = round((tdToSecs(p0) % SECS_PER_HOUR) / 60)
+        p1h = math.floor(tdToHours(p1))
+        p1m = round((tdToSecs(p1) % SECS_PER_HOUR) / 60)
+        pname = "%02d_%02d-%02d_%02d" % (p0h, p0m, p1h, p1m)
         period_names.append(pname)
     return period_names
 
