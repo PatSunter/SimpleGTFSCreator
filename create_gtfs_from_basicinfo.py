@@ -12,8 +12,7 @@ from datetime import datetime, date, time, timedelta
 from optparse import OptionParser
 import sys
 import os.path
-from operator import itemgetter
-import zipfile
+import operator
 
 import osgeo.ogr
 from osgeo import ogr
@@ -56,7 +55,8 @@ class Seq_Stop_Info:
         based on an average speed on that segment, and physical distance
         between them."""
         seg_speed = speed_model.get_speed_on_next_segment(self.extra_speed_info,
-            mode_config, curr_time, peak_status)
+            curr_time, peak_status)
+        assert seg_speed > 0
         time_hrs = self.dist_km_to_next / float(seg_speed)
         # Need to round this to nearest second and return as a timedelta.
         return timedelta(seconds=round(time_hrs * 3600))
@@ -67,13 +67,13 @@ def build_stop_list_and_seg_info_along_route(route_def, serv_period, dir_id,
 
     prebuilt_stop_info_list = []
     if len(route_def.ordered_seg_ids) == 0:
-        print "Warning: for route name '%s: %s', no route segments defined." \
-            % (route_def.short_name, route_def.long_name)
+        print "Warning: for route name %s, no route segments defined." \
+            % (route_segs.get_print_name(route_def))
         return []
     route_segments_lyr = route_segments_shp.GetLayer(0)
     stops_lyr = stops_shp.GetLayer(0)
 
-    seg_speed_model.setup_for_route(route_def)
+    seg_speed_model.setup_for_trip_set(route_def, serv_period, dir_id)
 
     # Apply a filter to speed up calculations - only segments on this route.
     where_clause = "%s LIKE '%%%s' OR %s LIKE '%%%s,%%'" % \
@@ -257,11 +257,14 @@ def create_gtfs_trips_stoptimes_for_route(route_def, route_segments_shp,
         gtfs_route_id, stop_id_to_gtfs_stop_id_map,
         init_trip_ctr):
 
-    print "Adding trips and stops for route '%s: %s'" \
-        % (route_def.short_name, route_def.long_name)
+    print "Adding trips and stops for route %s" \
+        % (route_segs.get_print_name(route_def))
     ntrips_this_route = 0
     #Re-grab the route entry from our GTFS schedule
     route = schedule.GetRoute(gtfs_route_id)
+    services_info = mode_config['services_info']
+    serv_periods = map(operator.itemgetter(0), services_info)
+    seg_speed_model.setup_for_route(route_def, serv_periods)
     # For our basic scheduler, we're going to just create both trips in
     # both directions, starting at exactly the same time, at the same
     # frequencies. The real-world implication of this is at least
@@ -271,7 +274,6 @@ def create_gtfs_trips_stoptimes_for_route(route_def, route_segments_shp,
         # N.B.: Possible we might want to convert
         # the services_info of headway periods to a configurable per-route 
         # later rather than per mode...
-        services_info = mode_config['services_info']
         for serv_period, serv_headways in services_info:
             print "Handing service period '%s'" % (serv_period)
             try:
@@ -282,7 +284,8 @@ def create_gtfs_trips_stoptimes_for_route(route_def, route_segments_shp,
             # Pre-calculate the stops list and save relevant info related to 
             # speed calculation from shapefiles for later.
             # as this is a moderately expensive operation.
-            # This way we do this just once per route, direction, and serv period.
+            # This way we do this just once per route, direction,
+            # and serv period.
             prebuilt_stop_info_list = build_stop_list_and_seg_info_along_route(
                 route_def, serv_period, dir_id, route_segments_shp, stops_shp,
                 mode_config, schedule, seg_speed_model,
@@ -432,7 +435,7 @@ def process_data(route_defs_csv_fname, input_segments_fname,
     segs_layer = route_segments_shp.GetLayer(0)
     stops_layer = stops_shp.GetLayer(0)
 
-    seg_speed_model.setup(route_defs, segs_layer, stops_layer)
+    seg_speed_model.setup(route_defs, segs_layer, stops_layer, mode_config)
 
     partial_save_files = []
     trips_total = 0
@@ -519,13 +522,14 @@ if __name__ == "__main__":
     parser.add_option('--usesegspeeds', dest='usesegspeeds', 
         help='Use per-segment speeds defined in route segments shapefile? '\
             'If false, then will just use a constant speed defined per mode.')
-    parser.add_option('--gtfs_fname_for_speeds', dest='gtfs_fname_for_speeds',
-        help='Path to GTFS input file to use for speeds. Should end in .zip')
+    parser.add_option('--gtfs_speeds_dir', dest='gtfs_speeds_dir',
+        help='Path to dir containing extracted speeds per time period from '
+            'a GTFS input file.')
     parser.add_option('--memorydb', dest='memorydb', 
         help='Should the GTFS schedule use an in-memory DB, or file based '\
             'one? Creating large GTFS schedules can be memory-hungry.')
     parser.set_defaults(output='google_transit.zip', usesegspeeds='True',
-        gtfs_fname_for_speeds='', memorydb='True')
+        gtfs_speeds_dir='', memorydb='True')
     (options, args) = parser.parse_args()
 
     if options.routedefs is None:
@@ -545,14 +549,19 @@ if __name__ == "__main__":
         parser.print_help()
         parser.error("Service option requested '%s' not in allowed set, of %s" \
             % (options.service, allowedServs))
-    gtfs_fname_for_speeds = options.gtfs_fname_for_speeds
 
+    gtfs_speeds_dir = options.gtfs_speeds_dir
     use_seg_speeds = parser_utils.str2bool(options.usesegspeeds)
     use_gtfs_speeds = False
-    if gtfs_fname_for_speeds:
+    if gtfs_speeds_dir:
         use_gtfs_speeds = True
         # Override
         use_seg_speeds = False
+        gtfs_speeds_dir = os.path.expanduser(gtfs_speeds_dir)
+        if not os.path.exists(gtfs_speeds_dir):
+            parser.print_help()
+            parser.error("GTFS speeds dir given '%s' doesn't exist." \
+                % gtfs_speeds_dir)
 
     memory_db = parser_utils.str2bool(options.memorydb)
 
@@ -560,20 +569,9 @@ if __name__ == "__main__":
 
     seg_speed_model = None
     if use_gtfs_speeds:
-        time_periods = [
-            (timedelta(hours=00,minutes=00), timedelta(hours=04,minutes=00)),
-            (timedelta(hours=04,minutes=00), timedelta(hours=06,minutes=00)),
-            (timedelta(hours=06,minutes=00), timedelta(hours=07,minutes=30)),
-            (timedelta(hours=07,minutes=30), timedelta(hours=10,minutes=00)),
-            (timedelta(hours=10,minutes=00), timedelta(hours=16,minutes=00)),
-            (timedelta(hours=16,minutes=00), timedelta(hours=18,minutes=30)),
-            (timedelta(hours=18,minutes=30), timedelta(hours=21,minutes=30)),
-            (timedelta(hours=21,minutes=30), timedelta(hours=24,minutes=30)),
-            (timedelta(hours=24,minutes=30), timedelta(hours=28,minutes=00)),
-            ]
         seg_speed_model = \
             seg_speed_models.MultipleTimePeriodsPerRouteSpeedModel(
-                time_periods, gtfs_fname_for_speeds)    
+                gtfs_speeds_dir)    
     elif use_seg_speeds:
         seg_speed_model = seg_speed_models.PerSegmentPeakOffPeakSpeedModel()
     else:
