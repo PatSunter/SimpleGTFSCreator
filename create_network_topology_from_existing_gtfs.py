@@ -326,8 +326,7 @@ def main():
     schedule = loader.Load()
     print "... done."
 
-    # TODO:- will need a more advanced speed model in future.
-    speed_model = seg_speed_models.PerSegmentPeakOffPeakSpeedModel()
+    speed_model = seg_speed_models.MultipleTimePeriodsPerRouteSpeedModel("")
     stops_shp_file, stops_lyr = tp_model.create_stops_shp_file(
         stops_shp_file_name, delete_existing=DELETE_EXISTING,
         gtfs_origin_field=True)
