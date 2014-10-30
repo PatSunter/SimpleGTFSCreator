@@ -932,3 +932,58 @@ def writeHeadwaysMinutes(schedule, period_headways, periods, csv_fname,
     csv_file.close()
     return
 
+def get_average_hways_all_stops_by_time_periods(hways_all_patterns):
+    n_tps = len(hways_all_patterns.values()[0].values()[0])
+    tp_hways_all_stops = {}
+    for dir_period_pair in hways_all_patterns.iterkeys():
+        tp_hways_all_stops[dir_period_pair] = \
+            [[] for dummy in xrange(n_tps)]
+    for dir_period_pair, each_stop_hways_in_tps in \
+            hways_all_patterns.iteritems():
+        for stop_hways_in_tps in each_stop_hways_in_tps.itervalues():
+            for tp_i, stop_hway in enumerate(stop_hways_in_tps):
+                if stop_hway > 0:
+                    tp_hways_all_stops[dir_period_pair][tp_i].append(stop_hway)
+    avg_hways_all_stops = {}
+    for dir_period_pair in hways_all_patterns.iterkeys():
+        avg_hways_all_stops[dir_period_pair] = [-1] * n_tps
+        for tp_i, tp_hways_at_stops in \
+                enumerate(tp_hways_all_stops[dir_period_pair]):
+            n_valid = len(tp_hways_at_stops)
+            if n_valid:
+                avg_hways_all_stops[dir_period_pair][tp_i] = \
+                    sum(tp_hways_at_stops) / float(n_valid)
+    return avg_hways_all_stops
+
+AVG_HWAYS_ALL_STOPS_HDRS = ['route_id','route_short_name','route_long_name',\
+    'serv_period','trips_dir']
+
+def write_route_hways_all_routes_all_stops(schedule, time_periods,
+        avg_hways_all_stops, output_fname, round_places=2):
+    print "Writing all route average headways in TPs to file %s ..." \
+        % output_fname
+    csv_file = open(output_fname, 'w')
+    writer = csv.writer(csv_file, delimiter=';')
+    period_names = get_time_period_name_strings(time_periods)
+    writer.writerow(AVG_HWAYS_ALL_STOPS_HDRS + period_names)
+    for route_id, avg_hways_all_stops_by_serv_periods in \
+            avg_hways_all_stops.iteritems():
+        gtfs_route = schedule.routes[route_id]    
+        r_short_name = gtfs_route.route_short_name
+        r_long_name = gtfs_route.route_long_name
+        avg_hways_all_stops_by_sps_sorted = \
+            sorted(avg_hways_all_stops_by_serv_periods.items(),
+                key=lambda x: x[0][1])
+        for dir_period_pair, avg_hways_in_tps in \
+                avg_hways_all_stops_by_sps_sorted:
+            trips_dir = dir_period_pair[0]
+            serv_period = dir_period_pair[1]
+            avg_hways_in_tps_rnd = map(lambda x: round(x, round_places), \
+                avg_hways_in_tps)
+            writer.writerow([route_id, r_short_name, r_long_name, \
+                serv_period, trips_dir] + avg_hways_in_tps_rnd)
+    csv_file.close()
+    print "... done writing."
+    return
+
+
