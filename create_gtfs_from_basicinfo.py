@@ -30,7 +30,7 @@ VERBOSE = False
 # Calc this once to save a bit of time as its used a lot
 TODAY = date.today()
 
-ROUTE_WRITE_BATCH_SIZE = 10
+ROUTE_WRITE_BATCH_DEF_SIZE = 20
 
 class Seq_Stop_Info:
     """A small struct to store key info about a stop in the sequence of a
@@ -419,7 +419,7 @@ def get_partial_save_name(output_fname, ii):
 
 def process_data(route_defs_csv_fname, input_segments_fname,
         input_stops_fname, mode_config, output, seg_speed_model,
-        memory_db):
+        memory_db, delete_partials, route_write_batch_size):
     # Now see if we can open both needed shape files correctly
     route_defs = route_segs.read_route_defs(route_defs_csv_fname)
     route_segments_shp = osgeo.ogr.Open(input_segments_fname)
@@ -440,7 +440,7 @@ def process_data(route_defs_csv_fname, input_segments_fname,
     partial_save_files = []
     trips_total = 0
     for ii, r_start in enumerate(range(0, len(route_defs), \
-            ROUTE_WRITE_BATCH_SIZE)):
+            route_write_batch_size)):
         # Create our schedule
         schedule = transitfeed.Schedule(memory_db=memory_db)
         # Agency
@@ -451,7 +451,7 @@ def process_data(route_defs_csv_fname, input_segments_fname,
             mode_config, schedule)
         stop_id_to_gtfs_stop_id_map = create_gtfs_stop_entries(stops_shp,
             mode_config, schedule)
-        r_end = r_start + (ROUTE_WRITE_BATCH_SIZE-1)
+        r_end = r_start + (route_write_batch_size-1)
         if r_end >= len(route_defs):
             r_end = len(route_defs)-1
         print "Processing routes %d to %d" % (r_start, r_end)
@@ -461,50 +461,62 @@ def process_data(route_defs_csv_fname, input_segments_fname,
             stop_id_to_gtfs_stop_id_map,
             initial_trip_id = trips_total)
         trips_total += len(schedule.trips)
-        fname = get_partial_save_name(output, ii)
-        print "About to save timetable so far to file %s in case..." % fname
-        schedule.WriteGoogleTransitFeed(fname)
-        print "...finished writing."
-        if fname not in partial_save_files:
-            partial_save_files.append(fname)
+        if route_write_batch_size >= len(route_defs):
+            print "About to save complete timetable to file %s ..." \
+                % output
+            schedule.Validate()
+            schedule.WriteGoogleTransitFeed(output)
+            print "...finished writing."
+        else:
+            fname = get_partial_save_name(output, ii)
+            print "About to save timetable so far to file %s in case..." \
+                % fname
+            schedule.WriteGoogleTransitFeed(fname)
+            print "...finished writing."
+            if fname not in partial_save_files:
+                partial_save_files.append(fname)
 
-    # Now we want to re-combine the separate zip files together
-    # to create our master schedule
-    master_schedule = transitfeed.Schedule(memory_db=False)
-    master_schedule.AddAgency(mode_config['name'], mode_config['url'],
-        mode_config['loc'], agency_id=mode_config['id'])
-    create_gtfs_service_periods(mode_config['services_info'],
-        master_schedule)
-    create_gtfs_route_entries(route_defs, mode_config, master_schedule)
-    create_gtfs_stop_entries(stops_shp, mode_config, master_schedule)
-    # Now close the shape files.
-    stops_shp = None
-    route_segments_shp = None
+    if route_write_batch_size < len(route_defs):
+        # Now we want to re-combine the separate zip files together
+        # to create our master schedule
+        master_schedule = transitfeed.Schedule(memory_db=False)
+        master_schedule.AddAgency(mode_config['name'], mode_config['url'],
+            mode_config['loc'], agency_id=mode_config['id'])
+        create_gtfs_service_periods(mode_config['services_info'],
+            master_schedule)
+        create_gtfs_route_entries(route_defs, mode_config, master_schedule)
+        create_gtfs_stop_entries(stops_shp, mode_config, master_schedule)
+        # Now close the shape files.
+        stops_shp = None
+        route_segments_shp = None
 
-    # Load it up progressively from partial files.
-    for fname in partial_save_files:
-        loader = transitfeed.Loader(feed_path=fname,
-            problems=transitfeed.ProblemReporter(),
-            memory_db=memory_db,
-            load_stop_times=True)
-        print "... now re-opening partial file %s ...." % fname 
-        part_schedule = loader.Load()
-        for trip in part_schedule.trips.itervalues():
-            stop_times = trip.GetStopTimes()
-            master_schedule.AddTripObject(trip)
-            for stop_time in stop_times:
-                trip.AddStopTimeObject(stop_time)
-        part_schedule = None
+        # Load it up progressively from partial files.
+        for fname in partial_save_files:
+            loader = transitfeed.Loader(feed_path=fname,
+                problems=transitfeed.ProblemReporter(),
+                memory_db=memory_db,
+                load_stop_times=True)
+            print "... now re-opening partial file %s ...." % fname 
+            part_schedule = loader.Load()
+            for trip in part_schedule.trips.itervalues():
+                stop_times = trip.GetStopTimes()
+                master_schedule.AddTripObject(trip)
+                for stop_time in stop_times:
+                    trip.AddStopTimeObject(stop_time)
+            part_schedule = None
 
-    print "About to do final validate and write ...."
-    master_schedule.Validate()
-    master_schedule.WriteGoogleTransitFeed(output)
-    print "Written successfully to: %s" % output
-    #print "Cleaning up temp save files."
-    #for fname in partial_save_files:
-    #    if os.path.exists(fname):
-    #        print "Deleting %s" % fname
-    #        os.unlink(fname)
+        print "About to do final validate and write ...."
+        master_schedule.Validate()
+        master_schedule.WriteGoogleTransitFeed(output)
+        print "Written successfully to: %s" % output
+        if delete_partials:
+            print "Cleaning up partial GTFS files..."
+            for fname in partial_save_files:
+                if os.path.exists(fname):
+                    print "Deleting %s" % fname
+                    os.unlink(fname)
+            print "...done."
+    return            
 
 if __name__ == "__main__":
     allowedServs = ', '.join(sorted(["'%s'" % key for key in \
@@ -528,9 +540,19 @@ if __name__ == "__main__":
     parser.add_option('--memorydb', dest='memorydb', 
         help='Should the GTFS schedule use an in-memory DB, or file based '\
             'one? Creating large GTFS schedules can be memory-hungry.')
+    parser.add_option('--delete_partials', dest='delete_partials', 
+        help='Should the partial GTFS files containing a subset of routes '\
+            'be deleted after complete file generated successfully?')
+    parser.add_option('--route_write_batch_size',
+        dest='route_write_batch_size', 
+        help='Number of routes to write out to file in each batch. Larger '\
+            'values mean writing will be faster, but will use more memory.')
     parser.set_defaults(output='google_transit.zip', usesegspeeds='True',
-        gtfs_speeds_dir='', memorydb='True')
+        gtfs_speeds_dir='', memorydb='True',
+        delete_partials='True',
+        route_write_batch_size=ROUTE_WRITE_BATCH_DEF_SIZE)
     (options, args) = parser.parse_args()
+            
 
     if options.routedefs is None:
         parser.print_help()
@@ -547,7 +569,7 @@ if __name__ == "__main__":
             % (allowedServs))
     if options.service not in m_t_info.settings:
         parser.print_help()
-        parser.error("Service option requested '%s' not in allowed set, of %s" \
+        parser.error("Service option requested '%s' not in allowed set, of %s"\
             % (options.service, allowedServs))
 
     gtfs_speeds_dir = options.gtfs_speeds_dir
@@ -564,6 +586,12 @@ if __name__ == "__main__":
                 % gtfs_speeds_dir)
 
     memory_db = parser_utils.str2bool(options.memorydb)
+    delete_partials = parser_utils.str2bool(options.delete_partials)
+    route_write_batch_size = int(options.route_write_batch_size)
+    if route_write_batch_size <= 0:
+        parser.print_help()
+        parser.error("Bad value of --route_write_batch_size given, must "\
+            "be > 0.")
 
     mode_config = m_t_info.settings[options.service]
 
@@ -584,4 +612,6 @@ if __name__ == "__main__":
         mode_config,
         os.path.expanduser(options.output),
         seg_speed_model,
-        memory_db)
+        memory_db,
+        delete_partials,
+        route_write_batch_size)
