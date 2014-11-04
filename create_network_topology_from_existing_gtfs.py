@@ -137,7 +137,11 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id, r_id,
         if route_dir != last_stop_dir:
             first_stop_dir = route_dir
             break
-    assert first_stop_dir is not None        
+    if first_stop_dir is None:
+        # This is probably a loop route, and the current OSSTIP network
+        # topology format doesn't handle these. So add "reverse" to name.
+        first_stop_dir = last_stop_dir + " (reversed)"
+    assert first_stop_dir is not None
     output_route_dirs = (last_stop_dir, first_stop_dir)
     return full_stop_pattern_segs, output_route_dirs
 
