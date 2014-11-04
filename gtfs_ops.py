@@ -865,7 +865,7 @@ def read_avg_speeds_on_segments(csv_fname, sort_seg_stop_id_pairs=False):
         stop_b_id = row[stop_b_id_i]
         stop_ids = stop_a_id, stop_b_id
         if sort_seg_stop_id_pairs:
-            stop_ids = tuple(sorted(stop_ids))
+            stop_ids = tuple(map(str, sorted(map(int, stop_ids))))
         seg_distances[stop_ids] = float(row[dist_row_i])
         speeds_in_tps = map(float, row[len(AVG_SPEED_HEADERS):])
         r_avg_speeds_on_segs[stop_ids] = speeds_in_tps
@@ -986,4 +986,39 @@ def write_route_hways_all_routes_all_stops(schedule, time_periods,
     print "... done writing."
     return
 
+def read_route_hways_all_routes_all_stops(per_route_hways_fname):
+    csv_in_file = open(per_route_hways_fname, 'r')
+    reader = csv.reader(csv_in_file, delimiter=';')
 
+    avg_hways_all_stops = {}
+    r_id_i = AVG_HWAYS_ALL_STOPS_HDRS.index('route_id')
+    sp_i = AVG_HWAYS_ALL_STOPS_HDRS.index('serv_period')
+    td_i = AVG_HWAYS_ALL_STOPS_HDRS.index('trips_dir')
+    headers = reader.next()
+    n_base_cols = len(AVG_HWAYS_ALL_STOPS_HDRS) 
+    tp_strs = headers[n_base_cols:]
+    tps = get_time_periods_from_strings(tp_strs)
+    for row in reader:
+        r_id = row[r_id_i]
+        serv_period = row[sp_i]
+        trips_dir = row[td_i]
+        avg_hways_in_tps = map(float, row[n_base_cols:])
+        if r_id not in avg_hways_all_stops:
+            avg_hways_all_stops[r_id] = {}
+        avg_hways_all_stops[r_id][(trips_dir,serv_period)] = avg_hways_in_tps
+    csv_in_file.close()
+    return avg_hways_all_stops, tps
+
+def get_tp_hways_tuples(avg_hways_in_tps, time_periods, peak_status=True):
+    """Assumes avg_hways_in_tps is in the form returned by func 
+    get_average_hways_all_stops_by_time_periods() for one route, and
+    one direction,serv_period pair."""
+    tp_hway_tuples = []
+    for tp, avg_hway in zip(time_periods, avg_hways_in_tps):
+        # This conversion to Times is a bit of a legacy of format in
+        # mdoe_timetable_info.py :- should probably be changed later.
+        tp_start = tdToTimeOfDay(tp[0])
+        tp_end = tdToTimeOfDay(tp[1])
+        tp_hway_tuple = (tp_start, tp_end, avg_hway, peak_status)
+        tp_hway_tuples.append(tp_hway_tuple)
+    return tp_hway_tuples    
