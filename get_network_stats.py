@@ -90,10 +90,11 @@ def calc_vehicles_needed_for_route_conservative_bidir(
     vehicles_needed = 2 * math.ceil(route_time_min / float(hway_near_peak))
     return vehicles_needed, valid_time
 
+RECOVERY_TIME_PERCENT = 10
+
 def calc_vehicles_needed_for_route_with_recovery_time(
         route_trav_time, service_headways):
     # Formula in this func based on that at http://www.transitmix.net
-    RECOVERY_TIME_PERCENT = 10
     hway_near_peak, valid_time = m_t_info.get_nearest_next_valid_freq_and_time(
         service_headways, MORNING_PEAK)
     assert hway_near_peak and hway_near_peak > 0
