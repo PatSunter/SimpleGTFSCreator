@@ -15,6 +15,7 @@ import parser_utils
 import route_segs
 import gtfs_ops
 import seg_speed_models
+import gtfs_ops
 import topology_shapefile_data_model as tp_model
 import mode_timetable_info as m_t_info
 
@@ -82,25 +83,31 @@ def calc_vehicles_needed_for_route_conservative_bidir(
         route_trav_time, service_headways):
     # This approach based on assuming need to start both route directions
     # simultaneously at the start.
-    freq_in_peak = m_t_info.get_freq_at_time(service_headways, MORNING_PEAK)
+    hway_near_peak, valid_time = m_t_info.get_nearest_next_valid_freq_and_time(
+        service_headways, MORNING_PEAK)
+    assert hway_near_peak and hway_near_peak > 0
     route_time_min = get_minutes(route_trav_time)
-    vehicles_needed = 2 * math.ceil(route_time_min / float(freq_in_peak))
-    return vehicles_needed
+    vehicles_needed = 2 * math.ceil(route_time_min / float(hway_near_peak))
+    return vehicles_needed, valid_time
 
 def calc_vehicles_needed_for_route_with_recovery_time(
         route_trav_time, service_headways):
     # Formula in this func based on that at http://www.transitmix.net
     RECOVERY_TIME_PERCENT = 10
-    freq_in_peak = m_t_info.get_freq_at_time(service_headways, MORNING_PEAK)
+    hway_near_peak, valid_time = m_t_info.get_nearest_next_valid_freq_and_time(
+        service_headways, MORNING_PEAK)
+    assert hway_near_peak and hway_near_peak > 0
     route_time_min = get_minutes(route_trav_time)
     bidir_route_time_with_rec = 2 * route_time_min \
         * (100+RECOVERY_TIME_PERCENT)/100
     vehicles_needed = math.ceil(bidir_route_time_with_rec / \
-        float(freq_in_peak))
-    return vehicles_needed
+        float(hway_near_peak))
+    return vehicles_needed, valid_time
 
-calc_vehicles_needed_for_route = calc_vehicles_needed_for_route_with_recovery_time
-#calc_vehicles_needed_for_route = calc_vehicles_needed_for_route_conservative_bidir
+calc_vehicles_needed_for_route = \
+    calc_vehicles_needed_for_route_with_recovery_time
+#calc_vehicles_needed_for_route = \
+#    calc_vehicles_needed_for_route_conservative_bidir
 
 def format_timedelta_nicely(time_d):
     total_secs = gtfs_ops.tdToSecs(time_d)
@@ -109,7 +116,7 @@ def format_timedelta_nicely(time_d):
     return "%d:%02d:%04.1f" % (hours, mins, secs)
 
 def get_all_route_infos(segs_lyr, stops_lyr, route_defs_csv_fname,
-        mode_config, seg_speed_model, per_route_hways=None):
+        mode_config, seg_speed_model, per_route_hways=None, hways_tps=None):
 
     route_defs = route_segs.read_route_defs(route_defs_csv_fname)
     route_defs.sort(key=route_segs.get_route_order_key_from_name)
@@ -143,19 +150,29 @@ def get_all_route_infos(segs_lyr, stops_lyr, route_defs_csv_fname,
     print "Of this dist, %05.2fkm is single-route, %05.2fkm is multi-route.\n"\
         % (tot_single_route, tot_multi_route)
 
+    route_peak_time_of_days = {}
     route_trav_times = {}
+    route_hways_in_peak = {}
     route_avg_speeds = {}
     route_vehicles_needed = {}
+
     seg_speed_model.setup(route_defs, segs_lyr, stops_lyr, mode_config)
     for r_def in route_defs:
         r_id = r_def.id
         rname = route_segs.get_print_name(r_def)
+        segs_in_route = route_segs.create_ordered_seg_refs_from_ids(
+            r_def.ordered_seg_ids, segs_lookup_dict)
+        # TODO: ideally, calculate the 'in to city' direction,
+        # as likely slower.
+        peak_busy_dir_id = 0
+        peak_busy_dir = r_def.dir_names[peak_busy_dir_id]
         services_info = mode_config['services_info']
         serv_periods = map(operator.itemgetter(0), services_info)
         PEAK_SERV_PERIOD_I = serv_periods.index(PEAK_SERV_PERIOD)
         setup_success = seg_speed_model.setup_for_route(r_def,
             [PEAK_SERV_PERIOD])
         if setup_success:
+            serv_period_to_use = PEAK_SERV_PERIOD
             serv_period_to_use_i = PEAK_SERV_PERIOD_I
         if not setup_success:
             for serv_period_i in range(len(services_info)):
@@ -165,43 +182,68 @@ def get_all_route_infos(segs_lyr, stops_lyr, route_defs_csv_fname,
                 setup_success = seg_speed_model.setup_for_route(r_def,
                     [serv_period])
                 if setup_success:
+                    serv_period_to_use = serv_period
                     serv_period_to_use_i = serv_period_i
                     break
         if not setup_success:
             print "Warning:- for route ID %s - %s, no route speeds setup "\
                 "successfully for any period. Entering vehicles "\
                 "needed as 0." % (str(r_id), rname)
+            route_peak_time_of_days[r_id] = None
+            route_hways_in_peak[r_id] = -1
             route_trav_times[r_id] = timedelta(0)
             route_avg_speeds[r_id] = 0
             route_vehicles_needed[r_id] = 0
             continue
+        # Load up for all service periods where possible, just in case we need
+        # them for speed calcs.
+        setup_success = seg_speed_model.setup_for_route(r_def,
+            serv_periods)
 
-        # TODO: ideally, calculate the 'in to city' direction, as slower.
-        peak_busy_dir_id = 0
-        peak_busy_dir = r_def.dir_names[peak_busy_dir_id]
         seg_speed_model.setup_for_trip_set(r_def, PEAK_SERV_PERIOD,
             peak_busy_dir_id)
-        segs_in_route = route_segs.create_ordered_seg_refs_from_ids(
-            r_def.ordered_seg_ids, segs_lookup_dict)
+
+        if not per_route_hways:
+            # Use the same period as we used to calc speed :- hopefully
+            # the peak period.
+            service_headways = services_info[serv_period_to_use_i][1]
+        else:
+            gtfs_r_id = r_def.gtfs_origin_id
+            avg_hways_for_route = per_route_hways[gtfs_r_id]
+            try:
+                avg_hways_for_route_in_dir_period = \
+                    avg_hways_for_route[(peak_busy_dir, serv_period_to_use)]
+            except:
+                # In some cases for bus loops, we had to manually add a
+                # reverse dir, so try other one.
+                other_dir = r_def.dir_names[1-peak_busy_dir_id]
+                avg_hways_for_route_in_dir_period = \
+                    avg_hways_for_route[(other_dir, serv_period_to_use)]
+            service_headways = gtfs_ops.get_tp_hways_tuples(
+                avg_hways_for_route_in_dir_period, hways_tps)
+        peak_hways, peak_valid_time = \
+            m_t_info.get_nearest_next_valid_freq_and_time(service_headways,
+                MORNING_PEAK)
+    
         route_trav_time = calc_time_on_route_peak(r_def, segs_in_route,
             segs_lookup_dict, seg_speed_model, peak_busy_dir_id)
+        route_peak_time_of_days[r_id] = peak_valid_time
+        route_hways_in_peak[r_id] = peak_hways
         route_trav_times[r_id] = route_trav_time
         route_avg_speeds[r_id] = route_lengths[r_id] \
             / gtfs_ops.tdToHours(route_trav_time)
-        if per_route_hways == None:
-            # Assumes "monfri" main service period is listed first.
-            service_headways = services_info[serv_period_to_use_i][1]
-        else:
-            service_headways = per_route_hways[r_id]
-        route_vehicles_needed[r_id] = calc_vehicles_needed_for_route(
-            route_trav_time, service_headways)
+        route_vehicles_needed[r_id], valid_trip_start_time = \
+            calc_vehicles_needed_for_route(route_trav_time, service_headways)
 
-    print "Route dists, trav times in peak, avg speed (km/h), and min. "\
-        "vehicles needed:" 
+    print "Route dists, peak times, hways at peak, trav times in peak, "\
+        "avg speed (km/h), and min. vehicles needed:" 
     for r_def in route_defs:
         r_id = r_def.id
         rname = route_segs.get_print_name(r_def)
-        print "%s: %05.2fkm, time %s, avespeed %.2f, vehicles %d" % (rname,
+        print "%s: %s, %.2f min, %05.2fkm, time %s, avespeed %.2f, vehicles %d" %\
+            (rname,
+            route_peak_time_of_days[r_id],
+            route_hways_in_peak[r_id],
             route_lengths[r_id],
             format_timedelta_nicely(route_trav_times[r_id]),
             route_avg_speeds[r_id],
@@ -275,10 +317,12 @@ def main():
             parser.print_help()
             parser.error("Per-route headways file given '%s' doesn't exist." \
                 % per_route_hways)
-        # TODO
-        per_route_hways = None
+        per_route_hways, hways_tps = \
+            gtfs_ops.read_route_hways_all_routes_all_stops(
+                per_route_hways_fname)
     else:
         per_route_hways = None
+        hways_tps = None
 
     seg_speed_model = None
     if use_gtfs_speeds:
@@ -296,7 +340,7 @@ def main():
     stops_lyr = stops_shp.GetLayer(0)
     
     get_all_route_infos(segs_lyr, stops_lyr, options.routes, mode_config,
-        seg_speed_model, per_route_hways)
+        seg_speed_model, per_route_hways, hways_tps)
     segs_shp.Destroy()
     stops_shp.Destroy()
 
