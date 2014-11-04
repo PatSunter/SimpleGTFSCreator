@@ -14,16 +14,6 @@ from datetime import timedelta
 import gtfs_ops
 import parser_utils
 
-def td_str_to_td(td_str):
-    td_parts = td_str.split(':')
-    if len(td_parts) != 2:
-        raise ValueError
-    td_hrs = int(td_parts[0])
-    td_mins = int(td_parts[1])
-    td = timedelta(hours=td_hrs, minutes=td_mins)
-    return td
-
-
 def decrease_hways_to_max_in_window(avg_hways_in_tps, tps, max_headway,
         time_window_start, time_window_end):
     avg_hways_in_tps_out = []
@@ -91,13 +81,13 @@ def main():
     serv_periods_to_mod = options.serv_periods.split(',')
 
     try:
-        time_window_start = td_str_to_td(options.time_window_start)
+        time_window_start = parser_utils.td_str_to_td(options.time_window_start)
     except ValueError:
         parser.print_help()
         parser.error("Bad value of time_window_start given %s, "\
             "see help above for correct format." % options.time_window_start)
     try:
-        time_window_end = td_str_to_td(options.time_window_end)
+        time_window_end = parser_utils.td_str_to_td(options.time_window_end)
     except ValueError:
         parser.print_help()
         parser.error("Bad value of time_window_end given %s, "\
