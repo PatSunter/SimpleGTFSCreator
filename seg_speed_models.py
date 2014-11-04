@@ -305,6 +305,7 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
         self._curr_time_periods = {}
         for serv_period, trips_dir in \
                 itertools.product(serv_periods, route_def.dir_names):
+            one_dir_opened = False
             try:
                 time_periods, route_avg_speeds, seg_distances = \
                     gtfs_ops.read_route_speed_info_by_time_periods(
@@ -317,18 +318,25 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
                     "dir-period combo (%s, %s)." \
                     % (route_segs.get_print_name(route_def), trips_dir, \
                        serv_period)
-                success_flag = False
                 continue    
             else:
+                one_dir_opened = True
                 self._curr_route_seg_speeds[(trips_dir, serv_period)] = \
                     route_avg_speeds        
                 self._curr_time_periods[(trips_dir, serv_period)] = time_periods
+            if not one_dir_opened:
+                success_flag = False
         return success_flag
 
     def setup_for_trip_set(self, route_def, serv_period, dir_id):
         self._last_time_period_found_i = None
         self._curr_serv_period = serv_period
         self._curr_dir_name = route_def.dir_names[dir_id]
+        dir_name = route_def.dir_names[dir_id]
+        if (dir_name, serv_period) not in self._curr_route_seg_speeds:
+            # Possibly, we don't have info for this time period / direction.
+            #return False
+            pass
         return True
 
     def save_extra_seg_speed_info(self, next_segment, serv_period, travel_dir):
@@ -356,10 +364,13 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
                     # We've got a workable speed set to use.
                     break    
         if not tp_speeds and tps:
-            print "Error for segment %s: can't find a matching set of "\
+            print "While curr_route is id %s, name %s:- "\
+                "Error for segment %s: can't find a matching set of "\
                 "avg speeds for this segment in any service period. "\
                 "GTFS ids of stops are %s and %s." \
-                % (next_segment.GetField(tp_model.SEG_ID_FIELD), \
+                % (self._curr_route_def.id, \
+                   route_segs.get_print_name(self._curr_route_def), \
+                   next_segment.GetField(tp_model.SEG_ID_FIELD), \
                    gtfs_stop_pair[0], gtfs_stop_pair[1])
             assert tp_speeds and tps
         speed_ext = MultipleTimePeriodsPerRouteSegSpeedInfo(tps, tp_speeds)
