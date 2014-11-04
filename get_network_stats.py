@@ -214,7 +214,7 @@ def get_all_route_infos(segs_lyr, stops_lyr, route_defs_csv_fname,
             try:
                 avg_hways_for_route_in_dir_period = \
                     avg_hways_for_route[(peak_busy_dir, serv_period_to_use)]
-            except:
+            except KeyError:
                 # In some cases for bus loops, we had to manually add a
                 # reverse dir, so try other one.
                 other_dir = r_def.dir_names[1-peak_busy_dir_id]
