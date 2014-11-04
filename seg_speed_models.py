@@ -29,11 +29,11 @@ class SpeedModel:
         return
 
     def setup_for_route(self, route_def, serv_periods):
-        return
+        return True
 
     def setup_for_trip_set(self, route_def, serv_period, dir_id):
         # By default, do nothing.
-        return 
+        return True
 
     def save_extra_seg_speed_info(self, next_segment, serv_period, travel_dir):
         # By default, do nothing :- as not all sub-classes use this.
@@ -254,6 +254,7 @@ class MultipleTimePeriodsSpeedModel(SpeedModel):
 
     def setup_for_trip_set(self, route_def, serv_period, dir_id):
         self._last_time_period_found_i = None
+        return True
 
     def get_speed_on_next_segment(self, seg_speed_info, curr_time,
             peak_status):
@@ -298,6 +299,7 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
         return
 
     def setup_for_route(self, route_def, serv_periods):
+        success_flag = True
         self._curr_route_def = route_def
         self._curr_route_seg_speeds = {}
         self._curr_time_periods = {}
@@ -315,17 +317,19 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
                     "dir-period combo (%s, %s)." \
                     % (route_segs.get_print_name(route_def), trips_dir, \
                        serv_period)
+                success_flag = False
                 continue    
             else:
                 self._curr_route_seg_speeds[(trips_dir, serv_period)] = \
                     route_avg_speeds        
                 self._curr_time_periods[(trips_dir, serv_period)] = time_periods
-        return
+        return success_flag
 
     def setup_for_trip_set(self, route_def, serv_period, dir_id):
         self._last_time_period_found_i = None
         self._curr_serv_period = serv_period
         self._curr_dir_name = route_def.dir_names[dir_id]
+        return True
 
     def save_extra_seg_speed_info(self, next_segment, serv_period, travel_dir):
         # We will look up relevant data for current serv period and direction,
@@ -375,6 +379,7 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
         # doesn't exist in the 'main' time period, we could be reading a
         # version that used different TPs.
         tps = seg_speed_info.time_periods
+        assert tps
         tp_i = get_time_period_index(tps, self._last_time_period_found_i,
             curr_time)
         assert tp_i is not None
