@@ -19,13 +19,7 @@ import route_segs
 
 def get_route_def_specs_from_csv(csv_fname):
     route_defs = []
-    try:
-        csv_file = open(csv_fname, 'r')
-    except IOError:
-        print "Error, route spec CSV file given, %s , failed to open." \
-            % (csv_fname)
-        sys.exit(1) 
-
+    csv_file = open(csv_fname, 'r')
     dict_reader = csv.DictReader(csv_file, delimiter=';', quotechar="'")
     for csv_row in dict_reader:
         try:
@@ -124,7 +118,13 @@ def main():
     
     csv_route_defs = []
     if options.route_spec_csv:
-        csv_route_defs = get_route_def_specs_from_csv(options.route_spec_csv)
+        try:
+            csv_route_defs = get_route_def_specs_from_csv(options.route_spec_csv)
+        except IOError:
+            parser.print_help()
+            print "\nError, route spec CSV file given, %s , failed to open." \
+                % (options.route_spec_csv)
+            sys.exit(1)
 
     route_defs_to_subset = get_single_route_def_list(route_short_names,
         route_long_names, csv_route_defs) 
