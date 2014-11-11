@@ -136,12 +136,31 @@ def getStopWithName(schedule, stop_name):
 
 # Tools for manipulating a schedule, and/or adding to a new schedule.
 
+def create_base_schedule_copy(input_schedule):
+    """Create a new schedule based on existing, with all the agencies,
+    periods, etc."""
+    output_schedule = transitfeed.Schedule(memory_db=False)
+    print "Copying file basics to new schedule."
+    for agency in input_schedule._agencies.itervalues():
+        ag_cpy = copy.copy(agency)
+        ag_cpy._schedule = None
+        output_schedule.AddAgencyObject(ag_cpy)
+    for serv_period in input_schedule.service_periods.itervalues():
+        serv_period_cpy = copy.copy(serv_period)
+        output_schedule.AddServicePeriodObject(serv_period_cpy)
+    return output_schedule
+
 def copy_selected_routes(input_schedule, output_schedule,
         gtfs_routes_to_copy_ids):
     routes_to_copy = []
-    for id_i, gtfs_route_id in enumerate(gtfs_routes_to_copy_ids):
-        if len(gtfs_routes_to_copy_ids) > 1 and \
-                gtfs_route_id in gtfs_routes_to_copy_ids[id_i+1:]:
+    # Do the below in case the func was passed a Python Set of routes
+    # instead of list.
+    # (Don't assume set though since the user may want to copy in a 
+    #  certain order for output purposes.)
+    gtfs_routes_to_copy_ids_list = list(gtfs_routes_to_copy_ids)
+    for id_i, gtfs_route_id in enumerate(gtfs_routes_to_copy_ids_list):
+        if len(gtfs_routes_to_copy_ids_list) > 1 and \
+                gtfs_route_id in gtfs_routes_to_copy_ids_list[id_i+1:]:
             print "Warning:- route with id %d requested to copy is "\
                 "contained multiple times in list to copy: skipping."\
                 "this instance." % (gtfs_route_id)
@@ -157,6 +176,9 @@ def copy_selected_routes(input_schedule, output_schedule,
             % (gtfs_route_id, route_name)
         route_cpy = copy.copy(gtfs_route)
         route_cpy._schedule = None
+        # PDS: (Following is a little bit hacky and is transitfeed library
+        # implementation-dependent. But is simplest way that works I was
+        # able to find via reading API docs and experiment.)
         route_cpy._trips = []
         output_schedule.AddRouteObject(route_cpy)
 
@@ -170,6 +192,15 @@ def copy_selected_routes(input_schedule, output_schedule,
                 output_schedule.AddTripObject(trip_cpy)
                 for stop_time in stop_times:
                     trip_cpy.AddStopTimeObject(stop_time)
+    return
+
+def copy_stops_with_ids(input_schedule, output_schedule, stop_ids):
+    """Copy the stops with given ids from input to output GTFS schedule."""
+    for stop_id in stop_ids:
+        stop = input_schedule.stops[stop_id]
+        stop_cpy = copy.copy(stop)
+        stop_cpy._schedule = None
+        output_schedule.AddStopObject(stop_cpy)
     return
 
 # Selecting by geometry operations
@@ -214,16 +245,26 @@ def get_route_ids_within_polygons(schedule, route_ids_to_check,
 
 # Extracting relevant info from a schedule, and saving to file.
 
-def get_all_stop_ids_used_by_route(gtfs_route, schedule):
+def get_all_stop_ids_used_by_route(schedule, route_id):
     """Returns a set (not list) of all stops visited as part of a route,
     for all trips."""
     stop_ids_all_trips = set([])
+    gtfs_route = schedule.routes[route_id]
     trip_dict = gtfs_route.GetPatternIdTripDict()
     for trips in trip_dict.values():
         stop_pattern = trips[0].GetPattern()
         stop_ids_in_trip = map(lambda x: x.stop_id, stop_pattern)
         stop_ids_all_trips = stop_ids_all_trips.union(set(stop_ids_in_trip))
     return stop_ids_all_trips
+
+def get_stop_ids_set_used_by_selected_routes(schedule, gtfs_route_ids):
+    stop_ids_used_by_routes = set([])
+    for r_id in gtfs_route_ids:
+        stop_ids_in_route = get_all_stop_ids_used_by_route(schedule,
+            r_id)
+        stop_ids_used_by_routes = stop_ids_used_by_routes.union(
+            stop_ids_in_route)
+    return stop_ids_used_by_routes
 
 def getStopVisitTimesForTripPatternByServPeriod(trips):
     master_stops = trips[0].GetPattern()
