@@ -85,6 +85,9 @@ def main():
         'Should end in .zip')
     parser.add_option('--output', dest='output', help='Path of output file. '\
         'Should end in .zip')
+    parser.add_option('--output_rem', dest='output_rem', help='(Optional) Path of '
+        'output GTFS file to save "remainder" routes, not in selection, to '\
+        '(Should end in .zip).')
     parser.add_option('--route_short_names', dest='route_short_names', 
         help='Names of route short names to subset and copy, comma-separated.')
     parser.add_option('--route_long_names', dest='route_long_names', 
@@ -112,6 +115,10 @@ def main():
     gtfs_input_fname = options.inputgtfs
     gtfs_output_fname = options.output
 
+    gtfs_output_rem_fname = None
+    if options.output_rem:
+        gtfs_output_rem_fname = options.output_rem
+
     route_short_names = parser_utils.getlist(options.route_short_names)
     route_long_names = parser_utils.getlist(options.route_long_names)
     
@@ -124,24 +131,10 @@ def main():
 
     accumulator = transitfeed.SimpleProblemAccumulator()
     problemReporter = transitfeed.ProblemReporter(accumulator)
-
     loader = transitfeed.Loader(gtfs_input_fname, problems=problemReporter)
     print "Loading input schedule from file %s ..." % gtfs_input_fname
     input_schedule = loader.Load()
     print "... done."
-
-    output_schedule = transitfeed.Schedule(memory_db=False)
-    # First, we're going to re-create with all the agencies, period,
-    #  stop locations etc
-
-    print "Copying file basics to new schedule."
-    for agency in input_schedule._agencies.itervalues():
-        ag_cpy = copy.copy(agency)
-        ag_cpy._schedule = None
-        output_schedule.AddAgencyObject(ag_cpy)
-    for serv_period in input_schedule.service_periods.itervalues():
-        serv_period_cpy = copy.copy(serv_period)
-        output_schedule.AddServicePeriodObject(serv_period_cpy)
 
     if route_defs_to_subset:
         print "Calculating subset of routes based on matching supplied "\
@@ -168,31 +161,47 @@ def main():
             input_schedule, subset_gtfs_route_ids, polygons_lyr)
         polygons_shp.Destroy()
 
-    print "Copying stops used in the %d " \
-        "matched routes." % len(subset_gtfs_route_ids)
-    stop_ids_in_subset_routes = set([])
-    for r_id in subset_gtfs_route_ids:
-        route = input_schedule.routes[r_id]
-        stop_ids_in_route = gtfs_ops.get_all_stop_ids_used_by_route(route,
-            input_schedule)
-        stop_ids_in_subset_routes = stop_ids_in_subset_routes.union(
-            stop_ids_in_route)
-    for stop_id in stop_ids_in_subset_routes:
-        stop = input_schedule.stops[stop_id]
-        stop_cpy = copy.copy(stop)
-        stop_cpy._schedule = None
-        output_schedule.AddStopObject(stop_cpy)
+    stop_ids_used_in_subset_routes = gtfs_ops.get_stop_ids_set_used_by_selected_routes(
+        input_schedule, subset_gtfs_route_ids)
 
-    print "Copying routes, trips, and trip stop times for the %d " \
-        "matched routes." % len(subset_gtfs_route_ids)
+    print "Copying stops, routes, trips, and trip stop times for the %d " \
+        "matched routes to new GTFS file %s ." \
+        % (len(subset_gtfs_route_ids), gtfs_output_fname)
+    output_schedule = gtfs_ops.create_base_schedule_copy(input_schedule)
+    gtfs_ops.copy_stops_with_ids(input_schedule, output_schedule,
+        stop_ids_used_in_subset_routes)
     gtfs_ops.copy_selected_routes(input_schedule, output_schedule,
         subset_gtfs_route_ids)
 
-    input_schedule = None
     print "About to do output schedule validate and write ...."
     output_schedule.Validate()
     output_schedule.WriteGoogleTransitFeed(gtfs_output_fname)
     print "Written successfully to: %s" % gtfs_output_fname
+    output_schedule = None
+
+    if gtfs_output_rem_fname:
+        rem_gtfs_route_ids = \
+            set(input_schedule.routes.iterkeys()).difference(subset_gtfs_route_ids)
+        print "Given the 'output_rem' option enabled, now saving a GTFS with "\
+            "the %d routes (and related trips, stops etc) NOT in the route "\
+            "subset, to file %s ." % \
+            (len(rem_gtfs_route_ids), gtfs_output_rem_fname)
+        # Careful, don't use a set below :- as stops can be re-used between
+        # routes, so need to re-calculate.
+        rem_gtfs_stop_ids = gtfs_ops.get_stop_ids_set_used_by_selected_routes(
+            input_schedule, rem_gtfs_route_ids)
+        output_rem_schedule = gtfs_ops.create_base_schedule_copy(input_schedule)
+        gtfs_ops.copy_stops_with_ids(input_schedule, output_rem_schedule,
+            rem_gtfs_stop_ids)
+        gtfs_ops.copy_selected_routes(input_schedule, output_rem_schedule,
+            rem_gtfs_route_ids)
+        print "About to do output schedule validate and write ...."
+        output_rem_schedule.Validate()
+        output_rem_schedule.WriteGoogleTransitFeed(gtfs_output_rem_fname)
+        print "Written successfully to: %s" % gtfs_output_rem_fname
+        output_rem_schedule = None
+
+    input_schedule = None
     return
 
 if __name__ == "__main__":
