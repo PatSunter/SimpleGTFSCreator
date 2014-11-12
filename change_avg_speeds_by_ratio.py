@@ -48,11 +48,13 @@ def main():
     if not os.path.exists(output_dir_speeds):
         os.makedirs(output_dir_speeds)
 
-    print "Increasing speed by ratio in all input speed files ..."
+    print "Reading speed from all input speed files in dir %s, "\
+        "changing them by ratio of %f, and saving modified results to dir "\
+        "%s ..." % (input_dir_speeds, speed_ratio, output_dir_speeds)
 
-    for csv_speeds_in_fname in glob.glob("%s%s*speeds*.csv" \
-            % (input_dir_speeds, os.sep)):
-        print "Reading speeds in file %s" % csv_speeds_in_fname
+    for ii, csv_speeds_in_fname in enumerate(glob.glob("%s%s*speeds*.csv" \
+            % (input_dir_speeds, os.sep))):
+        #print "Reading speeds in file %s" % csv_speeds_in_fname
         csv_in_file = open(csv_speeds_in_fname, 'r')
         reader = csv.reader(csv_in_file, delimiter=';')
         csv_speeds_out_fname = os.path.join(output_dir_speeds,
@@ -74,12 +76,12 @@ def main():
                     sp_out = sp
                 speeds_in_tps_out.append(sp_out)
             writer.writerow(init_col_vals + speeds_in_tps_out)
-        print "...finished saving changed speeds by ratio to file %s" \
-            % csv_speeds_out_fname
+        #print "...finished saving changed speeds by ratio to file %s" \
+        #    % csv_speeds_out_fname
         csv_in_file.close()
         csv_out_file.close()
 
-    print "... done."
+    print "... done (read and wrote %d speed spec files)." % (ii+1)
     return
 
 if __name__ == "__main__":
