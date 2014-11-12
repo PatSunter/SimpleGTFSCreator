@@ -161,8 +161,9 @@ def main():
             input_schedule, subset_gtfs_route_ids, polygons_lyr)
         polygons_shp.Destroy()
 
-    stop_ids_used_in_subset_routes = gtfs_ops.get_stop_ids_set_used_by_selected_routes(
-        input_schedule, subset_gtfs_route_ids)
+    stop_ids_used_in_subset_routes = \
+        gtfs_ops.get_stop_ids_set_used_by_selected_routes(input_schedule, 
+            subset_gtfs_route_ids)
 
     print "Copying stops, routes, trips, and trip stop times for the %d " \
         "matched routes to new GTFS file %s ." \
@@ -180,8 +181,8 @@ def main():
     output_schedule = None
 
     if gtfs_output_rem_fname:
-        rem_gtfs_route_ids = \
-            set(input_schedule.routes.iterkeys()).difference(subset_gtfs_route_ids)
+        r_ids_set = set(input_schedule.routes.iterkeys())
+        rem_gtfs_route_ids = r_ids_set.difference(subset_gtfs_route_ids)
         print "Given the 'output_rem' option enabled, now saving a GTFS with "\
             "the %d routes (and related trips, stops etc) NOT in the route "\
             "subset, to file %s ." % \
