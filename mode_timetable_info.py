@@ -32,6 +32,10 @@ SPARSE_SERVICE_INFO = [
 # 2: headway during period (time between services)
 # 3: Is this a peak period? True/False (used to decide speed in congested
 # areas).
+TP_START_COL = 0
+TP_END_COL = 1
+HWAY_COL = 2
+PEAK_STATUS_COL = 3
 default_service_headways = [
     (time(05,00), time(07,30), 20, False),
     (time(07,30), time(10,00), 5, True), 
@@ -156,7 +160,7 @@ START_DATE_STR = '20130101'
 END_DATE_STR = '20141231'
 
 def calc_total_service_time_elapsed(serv_headways, curr_time):
-    first_period_start_time = serv_headways[0][0]
+    first_period_start_time = serv_headways[0][TP_START_COL]
     tdiff = datetime.combine(TODAY, curr_time) \
         - datetime.combine(TODAY, first_period_start_time)
     if tdiff < timedelta(0):
@@ -165,12 +169,33 @@ def calc_total_service_time_elapsed(serv_headways, curr_time):
 
 def calc_service_time_elapsed_end_period(serv_headways, period_num):
     tdiff = calc_total_service_time_elapsed(serv_headways,
-        serv_headways[period_num][1])
+        serv_headways[period_num][TP_END_COL])
     return tdiff
 
 def get_freq_at_time(service_headways, time_of_day):
     for headway_period in service_headways:
-        if time_of_day >= headway_period[0] and \
-            time_of_day <= headway_period[1]:
-            return headway_period[2]
+        if time_of_day >= headway_period[TP_START_COL] and \
+            time_of_day <= headway_period[TP_END_COL]:
+            return headway_period[HWAY_COL]
     return None
+
+def get_nearest_next_valid_freq_and_time(service_headways, time_of_day):
+    valid_hway = None
+    valid_hway_time = None
+    for hp_i, headway_period in enumerate(service_headways):
+        if time_of_day >= headway_period[TP_START_COL] and \
+            time_of_day <= headway_period[TP_END_COL]:
+            hp_start_i = hp_i
+    
+    for hp_i in range(hp_start_i, len(service_headways)):
+        headway_period = service_headways[hp_i]
+        hway = headway_period[HWAY_COL]
+        if hway > 0:
+            valid_hway = hway
+            if hp_i == hp_start_i:
+                valid_hway_time = time_of_day
+            else:
+                valid_hway_time = headway_period[TP_START_COL]
+            break
+    return valid_hway, valid_hway_time
+
