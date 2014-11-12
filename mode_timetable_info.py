@@ -45,8 +45,15 @@ default_service_headways = [
     (time(23,00), time(02,00), 20, False)
     ]
 
-DEFAULT_SERVICE_INFO = [
+DEFAULT_TRAINS_SERVICE_INFO = [
     ("monfri", default_service_headways),
+    ("sat", default_service_headways),
+    ("sun", default_service_headways) ]
+
+# Using 'monthur' and 'fri' to copy PTV's for trams currently.
+DEFAULT_TRAMS_SERVICE_INFO = [
+    ("monthur", default_service_headways),
+    ("fri", default_service_headways),
     ("sat", default_service_headways),
     ("sun", default_service_headways) ]
 
@@ -97,7 +104,7 @@ settings = {
         'system': 'Subway',
         'avespeed': 65,
         'avespeed-peak': 50,
-        'services_info': DEFAULT_SERVICE_INFO,
+        'services_info': DEFAULT_TRAINS_SERVICE_INFO,
         'id': 30,
         'index': 3000000,
         'route_prefix': 'TR',
@@ -110,7 +117,7 @@ settings = {
         'system': 'Tram',
         'avespeed': 35,
         'avespeed-peak': 15,
-        'services_info': DEFAULT_SERVICE_INFO,
+        'services_info': DEFAULT_TRAMS_SERVICE_INFO,
         'id': 32,
         'index': 3200000,
         'route_prefix': 'TM',
