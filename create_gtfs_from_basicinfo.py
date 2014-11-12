@@ -520,13 +520,13 @@ def process_data(route_defs_csv_fname, input_segments_fname,
                 % output
             schedule.Validate()
             schedule.WriteGoogleTransitFeed(output)
-            print "...finished writing."
+            print "...finished writing to file %s." % (output)
         else:
             fname = get_partial_save_name(output, ii)
             print "About to save timetable so far to file %s in case..." \
                 % fname
             schedule.WriteGoogleTransitFeed(fname)
-            print "...finished writing."
+            print "...finished writing to file %s." % (fname)
             if fname not in partial_save_files:
                 partial_save_files.append(fname)
 
@@ -562,7 +562,7 @@ def process_data(route_defs_csv_fname, input_segments_fname,
         print "About to do final validate and write ...."
         master_schedule.Validate()
         master_schedule.WriteGoogleTransitFeed(output)
-        print "Written successfully to: %s" % output
+        print "Written successfully to file %s" % output
         if delete_partials:
             print "Cleaning up partial GTFS files..."
             for fname in partial_save_files:
