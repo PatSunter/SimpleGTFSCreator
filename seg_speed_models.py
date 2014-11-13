@@ -261,6 +261,12 @@ class MultipleTimePeriodsSpeedModel(SpeedModel):
         tp_speeds = seg_speed_info.time_period_speeds
         tp_i = get_time_period_index(self.time_periods, 
             self._last_time_period_found_i, curr_time)
+        if tp_i is None:
+            # If curr_time is beyond end of all time periods, its possibly
+            # that this is a trip that started in last TP but continues beyond
+            # it, which is OK.
+            if curr_time > self.time_periods[-1][1]:
+                tp_i = len(self.time_periods) - 1
         assert tp_i is not None
         self._last_time_period_found_i = tp_i
         seg_speed = find_valid_speed_nearest_to_period(tp_speeds, tp_i)
@@ -393,6 +399,12 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
         assert tps
         tp_i = get_time_period_index(tps, self._last_time_period_found_i,
             curr_time)
+        if tp_i is None:
+            # If curr_time is beyond end of all time periods, its possibly
+            # that this is a trip that started in last TP but continues beyond
+            # it, which is OK.
+            if curr_time > tps[-1][1]:
+                tp_i = len(tps) - 1
         assert tp_i is not None
         self._last_time_period_found_i = tp_i
         tp_speeds = seg_speed_info.time_period_speeds
