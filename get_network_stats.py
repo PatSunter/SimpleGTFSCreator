@@ -28,7 +28,7 @@ import mode_timetable_info as m_t_info
 
 # Bus service km / route:-
 
-PEAK_SERV_PERIOD = "monfri"
+PEAK_SERV_PERIODS = ["monfri","monthur"]
 MORNING_PEAK = time(8,00)
 MORNING_PEAK_TD = timedelta(hours=8,minutes=00)
 
@@ -63,8 +63,17 @@ def calc_time_on_route_peak(route_def, segs_in_route, segs_lookup_dict,
         seg_feat = segs_lookup_dict[seg_id]
         #seg_peak_speed_km_h = seg_feat.GetField(
         #    seg_speed_models.SEG_PEAK_SPEED_FIELD)
-        seq_stop_info = seg_speed_model.save_extra_seg_speed_info(seg_feat,
-            PEAK_SERV_PERIOD, peak_busy_dir_i)
+        
+        seq_stop_info = None
+        for serv_period in PEAK_SERV_PERIODS:
+            try:
+                seq_stop_info = seg_speed_model.save_extra_seg_speed_info(
+                    seg_feat, serv_period, peak_busy_dir_i)
+            except ValueError:
+                continue
+            else:
+                break
+        assert seq_stop_info
         seg_peak_speed_km_h = seg_speed_model.get_speed_on_next_segment(
             seq_stop_info, MORNING_PEAK_TD, True)
         if seg_peak_speed_km_h <= 0:
@@ -158,6 +167,20 @@ def get_all_route_infos(segs_lyr, stops_lyr, route_defs_csv_fname,
     route_vehicles_needed = {}
 
     seg_speed_model.setup(route_defs, segs_lyr, stops_lyr, mode_config)
+
+    peak_serv_period_i = None
+    peak_serv_period_to_use = None
+    if not per_route_hways:
+        for serv_period in PEAK_SERV_PERIODS:
+            try:     
+                peak_serv_period_i = serv_periods.index(serv_period)
+            except ValueError:
+                continue
+            else:
+                peak_serv_period_to_use = serv_period
+                break
+        assert peak_serv_period_i is not None
+
     for r_def in route_defs:
         r_id = r_def.id
         rname = route_segs.get_print_name(r_def)
@@ -169,17 +192,29 @@ def get_all_route_infos(segs_lyr, stops_lyr, route_defs_csv_fname,
         peak_busy_dir = r_def.dir_names[peak_busy_dir_id]
         services_info = mode_config['services_info']
         serv_periods = map(operator.itemgetter(0), services_info)
-        PEAK_SERV_PERIOD_I = serv_periods.index(PEAK_SERV_PERIOD)
+        if per_route_hways:
+            peak_serv_period_i = None
+            peak_serv_period_to_use = None
+            gtfs_r_id = r_def.gtfs_origin_id
+            avg_hways_for_route = per_route_hways[gtfs_r_id]
+            for trips_dir, serv_period in avg_hways_for_route:
+                if serv_period in PEAK_SERV_PERIODS:
+                    peak_serv_period_to_use = serv_period
+                    peak_serv_period_i = serv_periods.index(serv_period)
+                    break
+            assert peak_serv_period_i is not None
+            
         setup_success = seg_speed_model.setup_for_route(r_def,
-            [PEAK_SERV_PERIOD])
+            [peak_serv_period_to_use])
+        serv_period_to_use = None
+        serv_period_i_to_use = None
         if setup_success:
-            serv_period_to_use = PEAK_SERV_PERIOD
-            serv_period_to_use_i = PEAK_SERV_PERIOD_I
+            serv_period_to_use = peak_serv_period_to_use
+            serv_period_to_use_i = peak_serv_period_i
         if not setup_success:
-            for serv_period_i in range(len(services_info)):
-                if serv_period_i == PEAK_SERV_PERIOD_I:
+            for serv_period_i, serv_period in enumerate(serv_periods):
+                if serv_period in PEAK_SERV_PERIODS:
                     continue
-                serv_period = serv_periods[serv_period_i]
                 setup_success = seg_speed_model.setup_for_route(r_def,
                     [serv_period])
                 if setup_success:
@@ -201,7 +236,7 @@ def get_all_route_infos(segs_lyr, stops_lyr, route_defs_csv_fname,
         setup_success = seg_speed_model.setup_for_route(r_def,
             serv_periods)
 
-        seg_speed_model.setup_for_trip_set(r_def, PEAK_SERV_PERIOD,
+        seg_speed_model.setup_for_trip_set(r_def, serv_period_to_use,
             peak_busy_dir_id)
 
         if not per_route_hways:
