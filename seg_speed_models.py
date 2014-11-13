@@ -97,14 +97,14 @@ class PerSegmentPeakOffPeakSpeedModel(SpeedModel):
                 "calculating timetable, but given segments shapefile is "\
                 "missing field '%s'"\
                 % (SEG_PEAK_SPEED_FIELD)
-            sys.exit(1)
+            sys.exit(1)    
         try:
             free_speed_next = next_segment.GetField(SEG_FREE_SPEED_FIELD)
         except ValueError:
             print "ERROR: you asked to use per-segment speeds when "\
                 "calculating timetable, but given segments shapefile is "\
                 "missing field '%s'" % (SEG_FREE_SPEED_FIELD)
-            sys.exit(1)
+            sys.exit(1)    
         speed_ext = PeakOffPeakSegSpeedInfo(peak_speed_next, free_speed_next)
         return speed_ext
 
@@ -248,7 +248,7 @@ class MultipleTimePeriodsSpeedModel(SpeedModel):
                 "speeds when calculating timetable, but given segments "\
                 "shapefile is missing field '%s'"\
                 % (field_name)
-            sys.exit(1)
+            sys.exit(1)    
         speed_ext = MultipleTimePeriodSegSpeedInfo(time_period_speeds)
         return speed_ext
 
@@ -320,10 +320,11 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
                         trips_dir, sort_seg_stop_id_pairs=True)
             except IOError:
                 # Just skip this if not found
-                print "Warning: for route %s, no avg speeds found for "\
-                    "dir-period combo (%s, %s)." \
-                    % (route_segs.get_print_name(route_def), trips_dir, \
-                       serv_period)
+                # Might be because different routes have diff. serv periods
+                #print "Warning: for route %s, no avg speeds found for "\
+                #    "dir-period combo (%s, %s)." \
+                #    % (route_segs.get_print_name(route_def), trips_dir, \
+                #       serv_period)
                 continue    
             else:
                 one_dir_opened = True
