@@ -50,9 +50,11 @@ DEFAULT_TRAINS_SERVICE_INFO = [
     ("sat", default_service_headways),
     ("sun", default_service_headways) ]
 
-# Using 'monthur' and 'fri' to copy PTV's for trams currently.
+# Using 'monthur', 'fri', and 'monfri' to copy PTV's for trams currently.
+# (Individual routes have either first pair, or latter)
 DEFAULT_TRAMS_SERVICE_INFO = [
     ("monthur", default_service_headways),
+    ("monfri", default_service_headways),
     ("fri", default_service_headways),
     ("sat", default_service_headways),
     ("sun", default_service_headways) ]
