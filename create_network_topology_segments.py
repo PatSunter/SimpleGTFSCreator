@@ -298,7 +298,6 @@ if __name__ == "__main__":
         "to open." % (options.inputroutes)
         sys.exit(1)
     input_routes_lyr = input_routes_shp.GetLayer(0)    
-    routes_shp = osgeo.ogr.Open(route_geoms_fname, 0)
 
     stops_fname = os.path.expanduser(options.inputstops)
     input_stops_shp = osgeo.ogr.Open(stops_fname, 0)
