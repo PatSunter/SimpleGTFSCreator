@@ -247,11 +247,10 @@ def create_gtfs_trips_stoptimes(route_defs, route_segments_shp, stops_shp,
         key=route_segs.get_route_order_key_from_name)
     for ii, route_def in enumerate(sorted_route_defs):
         gtfs_route_id = route_id_to_gtfs_id_map[route_def.id]
+        avg_hways_for_route = None
         if per_route_hways:
             gtfs_origin_r_id = route_def.gtfs_origin_id
             avg_hways_for_route = per_route_hways[gtfs_origin_r_id]
-        else:
-            custom_services_info = None
         ntrips_this_route = create_gtfs_trips_stoptimes_for_route(
             route_def, route_segments_shp,
             stops_shp, mode_config, schedule, seg_speed_model,
