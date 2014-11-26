@@ -279,3 +279,50 @@ def move_dist_along_route(route_geom, current_loc, dist_along_route,
     else:
         last_vertex_i -= vertexes_passed
     return new_loc, last_vertex_i
+    
+#######
+### Funcs related to getting segments from route geometry
+
+def build_multipoint_from_lyr(stops_lyr):
+    stops_multipoint = ogr.Geometry(ogr.wkbMultiPoint)
+    stops_multipoint.AssignSpatialReference(stops_lyr.GetSpatialRef())
+    # Importantly, this will respect filters.
+    for stop in stops_lyr:
+        stop_geom = stop.GetGeometryRef()
+        stops_multipoint.AddGeometry(stop_geom)
+    stops_lyr.ResetReading()    
+    return stops_multipoint
+
+def reproject_all_multipoint(multipoint, new_srs):
+    mpoint_srs = multipoint.GetSpatialReference()
+    transform = osr.CoordinateTransformation(mpoint_srs, new_srs)
+    for pt_geom in multipoint:
+        pt_geom.Transform(transform)
+    return
+
+def get_multipoint_within_with_map(multipoint, test_geom):
+    """Get a new multipoint, which is the set of points from input
+    multipoint, that are within test_geom. Also return an 'intersection
+    map' from indices in the returned new mpoint_within, back to
+    corresponding point id within original."""
+    xmin, xmax, ymin, ymax = test_geom.GetEnvelope()
+    mpoint_within = ogr.Geometry(ogr.wkbMultiPoint)
+    isect_map = []
+    test_geom_srs = test_geom.GetSpatialReference()
+    for pt_i, pt_geom in enumerate(multipoint):
+        ptx, pty = pt_geom.GetPoint_2D(0)
+        # Hand-roll a bbox check to speed up before more expensive Within
+        # check.
+        if ptx >= xmin and ptx <= xmax \
+                and pty >= ymin and pty <= ymax \
+                and pt_geom.Within(test_geom):
+            mpoint_within.AddGeometry(pt_geom)
+            isect_map.append(pt_i)
+    return mpoint_within, isect_map
+
+def get_stops_near_route(route_geom, stops_multipoint):
+    route_buffer = route_geom.Buffer(STOP_ON_ROUTE_CHECK_DIST)
+    stops_near_route, stops_near_route_map = \
+        get_multipoint_within_with_map(stops_multipoint, route_buffer)
+    route_buffer.Destroy()
+    return stops_near_route, stops_near_route_map
