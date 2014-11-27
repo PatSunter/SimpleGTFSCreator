@@ -8,7 +8,20 @@ import re
 import osgeo.ogr
 from osgeo import ogr, osr
 
+# For normal routes
 ROUTE_NAME_FIELD = "NAME"
+# For route extensions
+ROUTE_EXT_ID_FIELD = "ID"
+ROUTE_EXT_NAME_FIELD = "Name"
+ROUTE_EXT_TYPE_FIELD = "Ext_Type"
+ROUTE_EXT_EXIST_S_NAME_FIELD = "Ext_s_name"
+ROUTE_EXT_EXIST_L_NAME_FIELD = "Ext_l_name"
+ROUTE_EXT_CONNECTING_STOP_FIELD = "Con_stop_i"
+
+ROUTE_EXT_TYPE_EXTENSION = "EXT"
+ROUTE_EXT_TYPE_NEW = "NEW"
+
+ROUTE_EXT_ALL_TYPES = [ROUTE_EXT_TYPE_EXTENSION, ROUTE_EXT_TYPE_NEW]
 
 # Note re route list field - a comma-separated list of route short names seg
 # belongs to. If route names short (e.g. 4 chars), can be up to 40 routes.
@@ -24,10 +37,10 @@ ROUTE_DIST_RATIO_TO_KM = 1000       # As it says - effectively encodes units
 
 EPSG_STOPS_FILE = 4326
 STOP_LYR_NAME = "stops"
-STOP_ID_FIELD = "gid"               # int, 10
-STOP_NAME_FIELD = "ID"              # int, 10
-STOP_TYPE_FIELD = "typ"             # str, 50 - reasonable length type strs.
-STOP_GTFS_ID_FIELD = "gtfs_id"      # int, 10
+STOP_ID_FIELD = "ID"               # int, 10
+STOP_NAME_FIELD = "name"           # str, 254
+STOP_TYPE_FIELD = "typ"            # str, 50 - reasonable length type strs.
+STOP_GTFS_ID_FIELD = "gtfs_id"     # int, 10
 
 ON_MOTORWAY_FIELD = 'mway'
 
@@ -35,6 +48,7 @@ STOP_TYPE_ROUTE_START_END = "ROUTE_START_END"
 STOP_TYPE_SELF_TFER = "TRANSFER_SELF"
 STOP_TYPE_FILLERS = "FILLERS"
 STOP_TYPE_FROM_EXISTING_GTFS = "FROM_EXISTING_GTFS"
+STOP_TYPE_NEW_EXTENDED = "NEW_EXTENDED_ROUTE"
 
 #################
 # Low-level functions to add new fields or check required ones exist.
@@ -218,7 +232,9 @@ def create_stops_shp_file(stops_shp_file_name, delete_existing=False,
     srs.ImportFromEPSG(EPSG_STOPS_FILE)
     layer = stops_shp_file.CreateLayer(STOP_LYR_NAME, srs, ogr.wkbPoint)
     layer.CreateField(ogr.FieldDefn(STOP_ID_FIELD, ogr.OFTInteger))
-    layer.CreateField(ogr.FieldDefn(STOP_NAME_FIELD, ogr.OFTInteger))
+    field = ogr.FieldDefn(STOP_NAME_FIELD, ogr.OFTString)
+    field.SetWidth(254)
+    layer.CreateField(field)
     field = ogr.FieldDefn(STOP_TYPE_FIELD, ogr.OFTString)
     field.SetWidth(50)
     layer.CreateField(field)
@@ -227,8 +243,48 @@ def create_stops_shp_file(stops_shp_file_name, delete_existing=False,
     print "... done."
     return stops_shp_file, layer
 
+def create_stops_shp_file_combined_from_existing(
+        stops_shp_file_name,
+        stops_lyr_1, stops_lyr_2,
+        delete_existing=False, gtfs_origin_field=False):
+    # First create empty new file
+    new_stops_shp_file, new_stops_lyr = create_stops_shp_file(
+        stops_shp_file_name, delete_existing=delete_existing,
+        gtfs_origin_field=gtfs_origin_field)
+
+    all_stops_multipoint = ogr.Geometry(ogr.wkbMultiPoint)
+    first_lyr_srs = stops_lyr_1.GetSpatialRef()
+    for stop_feat in stops_lyr_1:
+        try:
+            gtfs_id = stop_feat.GetField(STOP_GTFS_ID_FIELD)
+        except ValueError:
+            gtfs_id = None
+        add_stop(new_stops_lyr, all_stops_multipoint,
+            stop_feat.GetField(STOP_TYPE_FIELD),
+            stop_feat.GetGeometryRef(),
+            first_lyr_srs,
+            gtfs_id)
+
+    second_lyr_srs = stops_lyr_2.GetSpatialRef()
+    for stop_ii_second, stop_feat in enumerate(stops_lyr_2):
+        try:
+            stop_type = stop_feat.GetField(STOP_TYPE_FIELD)
+        except ValueError:
+            stop_type = STOP_TYPE_NEW_EXTENDED
+        try:
+            gtfs_id = stop_feat.GetField(STOP_GTFS_ID_FIELD)
+        except ValueError:
+            gtfs_id = None
+        add_stop(new_stops_lyr, all_stops_multipoint,
+            stop_type,
+            stop_feat.GetGeometryRef(),
+            second_lyr_srs,
+            gtfs_id)
+    all_stops_multipoint.Destroy()
+    return new_stops_shp_file, new_stops_lyr
+
 def add_stop(stops_lyr, stops_multipoint, stop_type, stop_geom, src_srs,
-        gtfs_id=None):
+        stop_name=None, gtfs_id=None):
     """Adds a stop to stops_lyr, and also its geometry to stops_multipoint. 
     In the case of stops_lyr, the new stops' geometry will be re-projected into
     the SRS of that layer before adding (hence need to pass srs_srs as an
@@ -250,13 +306,25 @@ def add_stop(stops_lyr, stops_multipoint, stop_type, stop_geom, src_srs,
     stop_geom2.Transform(transform)
     stop_feat.SetGeometry(stop_geom2)
     stop_feat.SetField(STOP_ID_FIELD, pt_id)
-    stop_feat.SetField(STOP_NAME_FIELD, pt_id)
+    if stop_name == None:
+        stop_feat.SetField(STOP_NAME_FIELD, str(pt_id))
+    else:
+        stop_feat.SetField(STOP_NAME_FIELD, str(stop_name))
     stop_feat.SetField(STOP_TYPE_FIELD, stop_type)
     if gtfs_id is not None:
         stop_feat.SetField(STOP_GTFS_ID_FIELD, int(gtfs_id))
     stops_lyr.CreateFeature(stop_feat)
     stop_feat.Destroy()
     return pt_id
+
+def get_stop_id_with_gtfs_id(stops_lyr, gtfs_id):
+    stop_id = None
+    for stop_feat in stops_lyr:
+        stop_gtfs_id = stop_feat.GetField(STOP_GTFS_ID_FIELD)
+        if stop_gtfs_id == search_gtfs_id:
+            stop_id = stop_feat.GetField(STOP_ID_FIELD)
+            break
+    return int(stop_id)
 
 def create_segs_shp_file(segs_shp_file_name, speed_model,
         delete_existing=False):

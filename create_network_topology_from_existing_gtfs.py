@@ -34,7 +34,7 @@ def add_all_stops_from_gtfs(schedule, stops_lyr, stops_multipoint):
         stop_pt.AddPoint(gtfs_stop.stop_lon, gtfs_stop.stop_lat)
         stop_id = tp_model.add_stop(stops_lyr, stops_multipoint,
             tp_model.STOP_TYPE_FROM_EXISTING_GTFS, stop_pt, gtfs_srs,
-            gtfs_id=gtfs_stop.stop_id)
+            stop_name=gtfs_stop.stop_name, gtfs_id=gtfs_stop.stop_id)
         gtfs_stop_id_to_stop_id_map[gtfs_stop.stop_id] = stop_id    
         stop_count += 1
     print "...done adding the %d stops." % stop_count
