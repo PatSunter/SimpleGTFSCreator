@@ -848,7 +848,7 @@ def read_route_defs(csv_file_name, do_sort=True):
             r_short_name = row['Route']
             r_long_name = None
         else:
-            r_id = row['route_id']
+            r_id = int(row['route_id'])
             r_short_name = row['route_short_name']
             if r_short_name == 'None' or len(r_short_name) == 0:
                 r_short_name = None
