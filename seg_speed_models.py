@@ -9,7 +9,6 @@ from datetime import datetime, date, time, timedelta
 import osgeo.ogr
 from osgeo import ogr, osr
 
-import gtfs_ops
 import route_segs
 import topology_shapefile_data_model as tp_model
 
@@ -307,6 +306,7 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
                 itertools.product(serv_periods, route_def.dir_names):
             one_dir_opened = False
             try:
+                import gtfs_ops
                 time_periods, route_avg_speeds, seg_distances = \
                     gtfs_ops.read_route_speed_info_by_time_periods(
                         self.input_avg_speeds_dir, route_def.short_name,
