@@ -877,7 +877,10 @@ def read_route_defs(csv_file_name, do_sort=True):
     return route_defs
 
 def write_route_defs(csv_file_name, route_defs):
-    routesfile = open(csv_file_name, 'w')
+    if sys.version_info >= (3,0,0):
+        routesfile = open(csv_file_name, 'w', newline='')
+    else:
+        routesfile = open(csv_file_name, 'wb')
     rwriter = csv.writer(routesfile, delimiter=';')
     rwriter.writerow(ROUTE_CSV_HEADERS_01)
 
