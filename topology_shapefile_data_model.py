@@ -24,8 +24,8 @@ ROUTE_DIST_RATIO_TO_KM = 1000       # As it says - effectively encodes units
 
 EPSG_STOPS_FILE = 4326
 STOP_LYR_NAME = "stops"
-STOP_ID_FIELD = "gid"               # int, 10
-STOP_NAME_FIELD = "ID"              # int, 10
+STOP_ID_FIELD = "ID"                # int, 10
+STOP_NAME_FIELD = "name"            # str, 254
 STOP_TYPE_FIELD = "typ"             # str, 50 - reasonable length type strs.
 STOP_GTFS_ID_FIELD = "gtfs_id"      # int, 10
 
@@ -176,6 +176,17 @@ def get_stop_feature(stop_name, stops_lyr, stop_prefix):
             break;    
     stops_lyr.ResetReading()        
     return match_feature
+
+def get_stop_id_with_name(stops_lyr, stop_name):
+    # Just do a linear search for now.
+    match_id = None
+    for feature in stops_lyr:
+        fname = feature.GetField(STOP_NAME_FIELD)
+        if fname == stop_name:
+            match_id = feature.GetField(STOP_ID_FIELD)
+            break;
+    stops_lyr.ResetReading()        
+    return match_id
 
 def get_route_segment(segment_id, route_segments_lyr):
     # Just do a linear search for now.
