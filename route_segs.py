@@ -190,7 +190,7 @@ def route_defs_match_statuses(route_def, route_def2):
 
 def get_matching_route_def(r_defs, r_def_spec):
     for r_def in r_defs:
-        if route_segs.route_defs_match_statuses(r_def, r_def_spec):
+        if route_defs_match_statuses(r_def, r_def_spec):
             return r_def
     return None            
 
