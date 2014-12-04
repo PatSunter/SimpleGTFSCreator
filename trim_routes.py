@@ -137,7 +137,7 @@ def main():
             trim_stop_first)
         trim_stop_second_id = tp_model.get_stop_id_with_name(stops_lyr,
             trim_stop_second)
-        r_def = get_matching_route_def(r_defs, r_def_spec)
+        r_def = route_segs.get_matching_route_def(r_defs, r_def_spec)
         if not r_def:
             print "Error:- the route you specified to be trimmed, with "\
                 "ID %s, short name '%s', long name '%s' - not found in "\
