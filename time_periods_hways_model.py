@@ -27,7 +27,11 @@ def get_route_hways_for_dir_period_fname(gtfs_route, serv_period,
 def write_headways_minutes(schedule, period_headways, periods, csv_fname,
         stop_id_order=None):
 
-    csv_file = open(csv_fname, 'w')
+    if sys.version_info >= (3,0,0):
+        csv_file = open(csv_fname, 'w', newline='')
+    else:
+        csv_file = open(csv_fname, 'wb')
+
     writer = csv.writer(csv_file, delimiter=';')
 
     period_names = misc_utils.get_time_period_name_strings(periods)

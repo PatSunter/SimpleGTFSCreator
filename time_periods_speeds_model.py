@@ -19,7 +19,10 @@ AVG_SPEED_HEADERS = ['Stop_a_id','Stop_a_name','Stop_b_id','Stop_b_name',\
 
 def write_avg_speeds_on_segments(stop_gtfs_ids_to_names_map, period_avg_speeds,
         seg_distances, periods, csv_fname, round_places):
-    csv_file = open(csv_fname, 'w')
+    if sys.version_info >= (3,0,0):
+        csv_file = open(csv_fname, 'w', newline='')
+    else:
+        csv_file = open(csv_fname, 'wb')
     writer = csv.writer(csv_file, delimiter=';')
 
     period_names = misc_utils.get_time_period_name_strings(periods)
