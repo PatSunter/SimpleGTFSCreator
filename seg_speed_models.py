@@ -342,7 +342,8 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
     def save_extra_seg_speed_info(self, next_segment, serv_period, travel_dir):
         # We will look up relevant data for current serv period and direction,
         #  and save.
-        gtfs_stop_pair = self._get_matching_gtfs_stop_pair(next_segment)
+        gtfs_stop_pair = tp_model.get_gtfs_stop_id_pair_of_segment(next_segment,
+            self.stop_id_to_gtfs_id_map)
         gtfs_stop_pair = tuple([str(gtfs_id) for gtfs_id in gtfs_stop_pair])
         dir_name = self._curr_route_def.dir_names[travel_dir]
         tps = None
@@ -375,13 +376,6 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
             assert tp_speeds and tps
         speed_ext = MultipleTimePeriodsPerRouteSegSpeedInfo(tps, tp_speeds)
         return speed_ext
-
-    def _get_matching_gtfs_stop_pair(self, next_segment):
-        stop_a_id, stop_b_id = tp_model.get_stop_ids_of_seg(next_segment)
-        gtfs_stop_a_id = self.stop_id_to_gtfs_id_map[stop_a_id]
-        gtfs_stop_b_id = self.stop_id_to_gtfs_id_map[stop_b_id]
-        gtfs_stop_ids_sorted = sorted([gtfs_stop_a_id, gtfs_stop_b_id])
-        return tuple(gtfs_stop_ids_sorted)
 
     def get_speed_on_next_segment(self, seg_speed_info, curr_time,
             peak_status):
