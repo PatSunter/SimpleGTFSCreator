@@ -188,6 +188,12 @@ def route_defs_match_statuses(route_def, route_def2):
         match_status = True
     return match_status
 
+def get_matching_route_def(r_defs, r_def_spec):
+    for r_def in r_defs:
+        if route_segs.route_defs_match_statuses(r_def, r_def_spec):
+            return r_def
+    return None            
+
 def route_def_matches_gtfs_route(route_def, gtfs_route):
     match_statuses = []
     if route_def.id is not None:
