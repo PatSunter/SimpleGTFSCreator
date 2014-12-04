@@ -140,6 +140,21 @@ def build_stop_id_to_gtfs_stop_id_map(stops_lyr):
     stops_lyr.ResetReading()
     return stop_id_to_gtfs_id_map
 
+def build_stop_id_to_stop_name_map(stops_lyr):
+    lyr_defn = stops_lyr.GetLayerDefn()
+    field_exists, field_i = check_field_exists(lyr_defn, STOP_NAME_FIELD)
+    if not field_exists:
+        raise ValueError("Can't build stop ID to name map for a "\
+            "stops layer that doesn't include a name field.")
+    stop_id_to_stop_name_map = {}
+    # Build mapping of osstip route id to gtfs route id
+    for stop in stops_lyr:
+        stop_id = stop.GetField(STOP_ID_FIELD)
+        stop_name = stop.GetField(STOP_NAME_FIELD)
+        stop_id_to_stop_name_map[stop_id] = stop_name
+    stops_lyr.ResetReading()
+    return stop_id_to_stop_name_map
+
 ###########################################################
 # Access functions for key properties of segment-stop info
 
@@ -187,6 +202,13 @@ def get_stop_id_with_name(stops_lyr, stop_name):
             break;
     stops_lyr.ResetReading()        
     return match_id
+
+def get_gtfs_stop_id_pair_of_segment(segment, stop_id_to_gtfs_id_map):
+    stop_a_id, stop_b_id = get_stop_ids_of_seg(segment)
+    gtfs_stop_a_id = stop_id_to_gtfs_id_map[stop_a_id]
+    gtfs_stop_b_id = stop_id_to_gtfs_id_map[stop_b_id]
+    gtfs_stop_ids_sorted = sorted([gtfs_stop_a_id, gtfs_stop_b_id])
+    return tuple(gtfs_stop_ids_sorted)
 
 def get_route_segment(segment_id, route_segments_lyr):
     # Just do a linear search for now.
