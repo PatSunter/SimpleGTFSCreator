@@ -25,9 +25,9 @@ def main():
     parser = OptionParser()
     parser.add_option('--input_gtfs', dest='inputgtfs',
         help='Path of input file. Should end in .zip')
-    parser.add_option('--output_dir_hways', dest='output_dir_hways',
+    parser.add_option('--output_hways_dir', dest='output_dir_hways',
         help='Directory to output headway files to.')
-    parser.add_option('--output_dir_speeds', dest='output_dir_speeds',
+    parser.add_option('--output_speeds_dir', dest='output_dir_speeds',
         help='Directory to output avg speed files to.')
     parser.add_option('--speed_calc_min_mins', dest='speed_calc_min_mins',
         help='Minimum time in minutes along routes to use for smoothing '\
