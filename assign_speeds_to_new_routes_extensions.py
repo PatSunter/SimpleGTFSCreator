@@ -36,11 +36,20 @@ def create_new_speed_entries(route_defs, route_ext_specs, segs_lookup_table,
     routes_processed = {}
     for route_def in route_defs:
         routes_processed[route_def.id] = False
+
+
+    print "Creating per-time period speed entries for the %d new/extended "\
+        "routes:" % len(route_ext_specs)
     # Handle the new/extended routes first
     for route_ext_spec in route_ext_specs:
         old_r_s_name = route_ext_spec[0]
         old_r_l_name = route_ext_spec[1]
         ext_r_s_name, ext_r_l_name = route_ext_spec[2], route_ext_spec[3]
+        print "\tProcessing new/extended route %s,\n\t  copying "\
+            "pre-existing seg speeds from route %s" \
+            % (misc_utils.get_route_print_name(ext_r_s_name, ext_r_l_name), \
+               misc_utils.get_route_print_name(old_r_s_name, old_r_l_name))
+               
         conn_stop_gtfs_id = route_ext_spec[4]
         upd_dir_name = route_ext_spec[5]
 
@@ -77,6 +86,11 @@ def create_new_speed_entries(route_defs, route_ext_specs, segs_lookup_table,
             last_orig_seg, stop_id_to_gtfs_stop_id_map)
         # Stringify
         last_orig_seg_gtfs_ids = tuple(map(str, last_orig_seg_gtfs_ids))
+        last_seg_stop_name_a = stop_id_to_name_map[last_orig_seg_ref.first_id]
+        last_seg_stop_name_b = stop_id_to_name_map[last_orig_seg_ref.second_id]
+        print "\t...calculated last original segment to copy speeds from\n"\
+            "\t  is b/w stops '%s' and '%s'." \
+            % (last_seg_stop_name_a, last_seg_stop_name_b)
 
         stop_gtfs_ids_to_names_map = {}
         for s_id in r_stop_ids:
@@ -98,7 +112,8 @@ def create_new_speed_entries(route_defs, route_ext_specs, segs_lookup_table,
             time_periods, route_avg_speeds_in, seg_distances_in = \
                 tps_speeds_model.read_route_speed_info_by_time_periods(
                     speeds_dir_in, old_r_s_name, old_r_l_name,
-                    serv_period, trips_dir_file_ready, sort_seg_stop_id_pairs=True)
+                    serv_period, trips_dir_file_ready,
+                    sort_seg_stop_id_pairs=False)
             # Handle the case where the connecting stop isn't included.
             gtfs_stop_pairs_this_file = route_avg_speeds_in.keys()
             shifted_last = 0
@@ -125,6 +140,8 @@ def create_new_speed_entries(route_defs, route_ext_specs, segs_lookup_table,
             seg_distances_out = {}
             for s_ii, seg_ref in enumerate(ext_r_seg_refs):
                 seg = segs_lookup_table[seg_ref.seg_id]
+                # TODO:- issue with order :- we don't want to sort here
+                # always.
                 seg_gtfs_ids = tp_model.get_gtfs_stop_id_pair_of_segment(
                     seg, stop_id_to_gtfs_stop_id_map)
                 seg_gtfs_ids = tuple(map(str, seg_gtfs_ids))
@@ -165,6 +182,11 @@ def create_new_speed_entries(route_defs, route_ext_specs, segs_lookup_table,
                 route_avg_speeds_out, seg_distances_out,
                 time_periods, out_fpath, SPEED_ROUND_PLACES)
         routes_processed[ext_route.id] = True
+    n_reg_routes = sum([1 if p==False else 0 for p in \
+        routes_processed.values()])
+    assert n_reg_routes + len(route_ext_specs) == len(routes_processed)
+    print "Now copying per-time period speed entries for the remaining %d "\
+        "regular routes." % (n_reg_routes)
     # Now copy all remaining route files
     for route_def in route_defs:
         if not routes_processed[route_def.id]:
@@ -175,6 +197,7 @@ def create_new_speed_entries(route_defs, route_ext_specs, segs_lookup_table,
                     route_print_name))
             for speeds_fname in route_speeds_fnames:
                 shutil.copy(speeds_fname, speeds_dir_out)
+    print "...done."
     return
 
 def main():
