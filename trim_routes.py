@@ -12,6 +12,7 @@ from optparse import OptionParser
 
 from osgeo import ogr, osr
 
+import misc_utils
 import route_segs
 import mode_timetable_info as m_t_info
 import seg_speed_models
@@ -115,8 +116,12 @@ def main():
             % (options.route_trim_spec_csv)
         sys.exit(1)
 
+    print "Read in the list of %d routes you want to trim ..." \
+        % len(route_trims)
+
     # Load the route defs from file
-    r_defs = route_segs.read_route_defs(options.input_route_defs)
+    in_r_defs = route_segs.read_route_defs(options.input_route_defs,
+        do_sort=False)
     # Load the segments and stops from file
     stops_shp = ogr.Open(options.input_stops)
     stops_lyr = stops_shp.GetLayer(0)
@@ -128,31 +133,36 @@ def main():
         seg_ref = route_segs.seg_ref_from_feature(seg_feat)
         output_seg_refs_dict[seg_ref.seg_id] = seg_ref
     #segs_lookup_table = tp_model.build_segs_lookup_table(output_segs_lyr)
+
+    print "Starting trimming these routes:"
     updated_r_defs = []
     for r_def_spec, trim_stop_first, trim_stop_second, upd_dir_1, upd_dir_2 \
             in route_trims:
+        print "\tTrimming route %s b/w stops '%s' and '%s' ..." \
+            % (misc_utils.get_route_print_name(r_def_spec.short_name, \
+                r_def_spec.long_name), trim_stop_first, trim_stop_second)
         # We can't be sure of the order the trim stops will be
         # encountered.
         trim_stop_first_id = tp_model.get_stop_id_with_name(stops_lyr,
             trim_stop_first)
         trim_stop_second_id = tp_model.get_stop_id_with_name(stops_lyr,
             trim_stop_second)
-        r_defs = route_segs.get_matching_route_defs(r_defs, r_def_spec)
-        if len(r_defs) == 0:
+        match_r_defs = route_segs.get_matching_route_defs(in_r_defs, r_def_spec)
+        if len(match_r_defs) == 0:
             print "Error:- the route you specified to be trimmed, with "\
                 "ID %s, short name '%s', long name '%s' - not found in "\
                 "list of routes specified in file %s ." %\
                 (r_def_spec.id, r_def_spec.short_name, r_def_spec.long_name,\
                  options.input_route_defs)
             sys.exit(1)
-        elif len(r_defs) > 1:
+        elif len(match_r_defs) > 1:
             print "Error:- the route you specified to be trimmed, with "\
                 "ID %s, short name '%s', long name '%s' - matched multiple "\
                 "routes of those specified in file %s ." %\
                 (r_def_spec.id, r_def_spec.short_name, r_def_spec.long_name,\
                  options.input_route_defs)
             sys.exit(1)
-        r_def = r_defs[0]
+        r_def = match_r_defs[0]
 
         r_seg_refs = [output_seg_refs_dict[s_id] for s_id in \
             r_def.ordered_seg_ids]
@@ -188,6 +198,7 @@ def main():
                 r_def.dir_names = (upd_dirs[0], r_def.dir_names[1])
             else:    
                 r_def.dir_names = tuple(upd_dirs)
+
         # Now process the route segments :- trim out any part not within the 
         # stops defined by trim stops a and b.
         trim_stop_ids_rem = [trim_stop_first_id, trim_stop_second_id]
@@ -217,10 +228,15 @@ def main():
         updated_r_def = copy.deepcopy(r_def)
         updated_r_def.ordered_seg_ids = updated_r_seg_ids
         updated_r_defs.append(updated_r_def)
+        print "\t...route trimmed from %d segments to %d." \
+            % (len(r_seg_refs), len(updated_r_seg_ids))
+
+    print "Just copying the other %d routes as is." \
+        % (len(in_r_defs) - len(updated_r_defs))
     # Create output r_defs list
     updated_r_ids = map(operator.attrgetter("id"), updated_r_defs)
     output_r_defs = []
-    for r_def in r_defs:
+    for r_def in in_r_defs:
         try:
             upd_ii = updated_r_ids.index(r_def.id)
         except ValueError:
