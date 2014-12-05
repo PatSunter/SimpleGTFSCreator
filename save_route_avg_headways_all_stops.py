@@ -13,6 +13,7 @@ from optparse import OptionParser
 import transitfeed
 import gtfs_ops
 import route_segs
+import time_periods_hways_model as tps_hways_model
 
 MAX_SERV_PERIOD_HRS = 48
 
@@ -96,7 +97,7 @@ def main():
                 hways_all_patterns)
         avg_hways_all_stops[r_id] = avg_hways_all_stops_this_route    
             
-    gtfs_ops.write_route_hways_all_routes_all_stops(schedule,
+    tps_hways_model.write_route_hways_all_routes_all_stops(schedule,
         time_periods, avg_hways_all_stops, output_hways_fname, round_places)
     return
 

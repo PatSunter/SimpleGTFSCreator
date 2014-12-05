@@ -740,11 +740,11 @@ def extract_stop_ids_from_pairs(stop_id_pairs):
         s_ids = s_ids.union(list(s_id_pair))
     return s_ids
 
-def build_stop_gtfs_ids_to_names_map(schedule, stop_id_pairs):
+def build_stop_gtfs_ids_to_names_map(schedule, s_ids):
     stop_gtfs_ids_to_names_map = {}
-    for s_id in s_ids_this_route:
-        stop_gtfs_ids_to_names_map = schedule.stops[s_id].stop_name
-    return stop_ids_to_names_map
+    for s_id in s_ids:
+        stop_gtfs_ids_to_names_map[int(s_id)] = schedule.stops[s_id].stop_name
+    return stop_gtfs_ids_to_names_map
 
 def write_route_speed_info_by_time_periods(schedule, gtfs_route_id,
         time_periods,
@@ -758,21 +758,22 @@ def write_route_speed_info_by_time_periods(schedule, gtfs_route_id,
     trip_dict = gtfs_route.GetPatternIdTripDict()
     route_dir_serv_periods = extract_route_dir_serv_period_tuples(trip_dict)
 
-    s_ids_this_route = extract_stop_ids_from_pairs(
-        route_avg_speeds_during_time_periods[0].iterkeys())
-    stop_gtfs_ids_to_names_map = build_stop_gtfs_ids_to_names_map(schedule, s_ids_this_route)
-
     for route_dir, serv_period in route_dir_serv_periods:
-            avg_speeds = route_avg_speeds_during_time_periods[\
-                (route_dir, serv_period)]
-            fname_all = tps_speeds_model.get_route_avg_speeds_for_dir_period_fname(
-                gtfs_route.route_short_name, gtfs_route.route_long_name,
-                serv_period, route_dir)
-            fpath = os.path.join(output_path, fname_all)
-            tps_speeds_model.write_avg_speeds_on_segments(
-                stop_gtfs_ids_to_names_map,
-                avg_speeds, seg_distances, time_periods,
-                fpath, round_places)
+        avg_speeds = route_avg_speeds_during_time_periods[\
+            (route_dir, serv_period)]
+        s_ids_this_route_period = extract_stop_ids_from_pairs(
+            avg_speeds.iterkeys())
+        stop_gtfs_ids_to_names_map = build_stop_gtfs_ids_to_names_map(schedule,
+            s_ids_this_route_period)
+
+        fname_all = tps_speeds_model.get_route_avg_speeds_for_dir_period_fname(
+            gtfs_route.route_short_name, gtfs_route.route_long_name,
+            serv_period, route_dir)
+        fpath = os.path.join(output_path, fname_all)
+        tps_speeds_model.write_avg_speeds_on_segments(
+            stop_gtfs_ids_to_names_map,
+            avg_speeds, seg_distances, time_periods,
+            fpath, round_places)
     return
 
 def write_route_freq_info_by_time_periods_by_patterns(schedule, gtfs_route_id,
@@ -808,14 +809,11 @@ def write_route_freq_info_by_time_periods_all_patterns(schedule, gtfs_route_id,
     trip_dict = gtfs_route.GetPatternIdTripDict()
     route_dir_serv_periods = extract_route_dir_serv_period_tuples(trip_dict)
 
-    s_ids_this_route = extract_stop_ids_from_pairs(
-        route_hways_during_time_periods_all_patterns[0].iterkeys())
-    stop_gtfs_ids_to_names_map = build_stop_gtfs_ids_to_names_map(
-        schedule, s_ids_this_route)
-
     for route_dir, serv_period in route_dir_serv_periods:
         stop_write_order = all_patterns_nominal_stop_orders[\
             (route_dir, serv_period)]
+        stop_gtfs_ids_to_names_map = build_stop_gtfs_ids_to_names_map(
+            schedule, stop_write_order)
         fname_all = tps_hways_model.get_route_hways_for_dir_period_fname(
             gtfs_route, serv_period, route_dir)
         fpath = os.path.join(output_path, fname_all)

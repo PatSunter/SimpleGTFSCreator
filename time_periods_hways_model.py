@@ -24,8 +24,8 @@ def get_route_hways_for_dir_period_fname(gtfs_route, serv_period,
         (rname_file_ready, serv_period, rdir_str)
     return fname
 
-def write_headways_minutes(schedule, period_headways, periods, csv_fname,
-        stop_id_order=None):
+def write_headways_minutes(stop_gtfs_ids_to_names_map, period_headways,
+        periods, csv_fname, stop_id_order=None):
 
     if sys.version_info >= (3,0,0):
         csv_file = open(csv_fname, 'w', newline='')
@@ -43,7 +43,7 @@ def write_headways_minutes(schedule, period_headways, periods, csv_fname,
         s_ids = stop_id_order
     for s_id in s_ids:
         period_headways_at_stop = period_headways[s_id]
-        writer.writerow([s_id, schedule.stops[s_id].stop_name] \
+        writer.writerow([s_id, stop_gtfs_ids_to_names_map[int(s_id)]] \
             + period_headways_at_stop)
     csv_file.close()
     return
