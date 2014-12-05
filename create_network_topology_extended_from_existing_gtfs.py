@@ -226,11 +226,6 @@ def create_new_route_def_extend_existing(r_def_to_extend, r_ext_info,
         new_r_id, connecting_stop_id, orig_route_first_stop_id,
         segs_lookup_table, ext_seg_refs):
 
-    # TODO:- need to decide which directions of existing route to
-    #  add segments on to, adjust directions accordingly, etc
-    # Create a new route-def entry that duplicates the inner
-    # segments of the existing route
-
     init_seg_ref_ids = r_def_to_extend.ordered_seg_ids
     ext_seg_ref_ids = map(operator.attrgetter('seg_id'), ext_seg_refs)
     # Ok:- we need to ensure connecting stop is at one of the ends,
@@ -259,7 +254,7 @@ def create_new_route_def_extend_existing(r_def_to_extend, r_ext_info,
 
     if connecting_stop_id == stop_ids_of_extension[0]:
         combined_seg_ref_ids = init_seg_ref_ids_to_use + \
-            ext_seg_ref_ids        
+            ext_seg_ref_ids
     elif connecting_stop_id == stop_ids_of_extension[-1]:
         combined_seg_ref_ids = init_seg_ref_ids_to_use + \
             list(reversed(ext_seg_ref_ids))
@@ -274,7 +269,10 @@ def create_new_route_def_extend_existing(r_def_to_extend, r_ext_info,
         r_long_name = r_ext_info.upd_r_long_name
     else:
         r_long_name = r_def_to_extend.long_name
-    dir_names = (dir_name_to_keep, r_ext_info.upd_dir_name)
+
+    # Due to the algorithm above, the segments are now always listed in the
+    # order of going _to_ the extension.
+    dir_names = (r_ext_info.upd_dir_name, dir_name_to_keep)
 
     new_r_def = route_segs.Route_Def(
         new_r_id, 
@@ -285,9 +283,8 @@ def create_new_route_def_extend_existing(r_def_to_extend, r_ext_info,
 
     return new_r_def
 
-def create_extended_topology(
-        existing_route_defs, existing_segs_lyr, all_stops_lyr,
-        route_ext_infos, route_exts_lyr):
+def create_extended_topology( existing_route_defs, existing_segs_lyr,
+        all_stops_lyr, route_ext_infos, route_exts_lyr):
 
     existing_segs_lookup_table = tp_model.build_segs_lookup_table(
         existing_segs_lyr)
@@ -296,7 +293,8 @@ def create_extended_topology(
         route_ext_infos, existing_route_defs, existing_segs_lyr,
         existing_segs_lookup_table, all_stops_lyr)
 
-    # This 2nd list of route defs is the one we're going to manipulate outputs in
+    # This 2nd list of route defs is the one we're going to manipulate
+    # outputs in
     combined_route_defs = copy.deepcopy(existing_route_defs)
 
     existing_seg_refs = route_segs.get_all_seg_refs(existing_segs_lyr)
