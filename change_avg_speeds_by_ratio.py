@@ -59,7 +59,10 @@ def main():
         reader = csv.reader(csv_in_file, delimiter=';')
         csv_speeds_out_fname = os.path.join(output_dir_speeds,
             os.path.basename(csv_speeds_in_fname))
-        csv_out_file = open(csv_speeds_out_fname, 'w')    
+        if sys.version_info >= (3,0,0):
+            csv_out_file = open(csv_speeds_out_fname, 'w', newline='')
+        else:
+            csv_out_file = open(csv_speeds_out_fname, 'wb')
         writer = csv.writer(csv_out_file, delimiter=';')
 
         headers = reader.next()

@@ -121,7 +121,10 @@ def main():
 
     csv_in_file = open(input_hways_fname, 'r')
     reader = csv.reader(csv_in_file, delimiter=';')
-    csv_out_file = open(output_hways_fname, 'w')    
+    if sys.version_info >= (3,0,0):
+        csv_out_file = open(output_hways_fname, 'w', newline='')
+    else:
+        csv_out_file = open(output_hways_fname, 'wb')
     writer = csv.writer(csv_out_file, delimiter=';')
 
     r_id_i = gtfs_ops.AVG_HWAYS_ALL_STOPS_HDRS.index('route_id') 

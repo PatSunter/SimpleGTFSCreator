@@ -41,10 +41,10 @@ ROUTE_DIST_RATIO_TO_KM = 1000       # As it says - effectively encodes units
 
 EPSG_STOPS_FILE = 4326
 STOP_LYR_NAME = "stops"
-STOP_ID_FIELD = "ID"               # int, 10
-STOP_NAME_FIELD = "name"           # str, 254
-STOP_TYPE_FIELD = "typ"            # str, 50 - reasonable length type strs.
-STOP_GTFS_ID_FIELD = "gtfs_id"     # int, 10
+STOP_ID_FIELD = "ID"                # int, 10
+STOP_NAME_FIELD = "name"            # str, 254
+STOP_TYPE_FIELD = "typ"             # str, 50 - reasonable length type strs.
+STOP_GTFS_ID_FIELD = "gtfs_id"      # int, 10
 
 ON_MOTORWAY_FIELD = 'mway'
 
@@ -158,6 +158,21 @@ def build_stop_id_to_gtfs_stop_id_map(stops_lyr):
     stops_lyr.ResetReading()
     return stop_id_to_gtfs_id_map
 
+def build_stop_id_to_stop_name_map(stops_lyr):
+    lyr_defn = stops_lyr.GetLayerDefn()
+    field_exists, field_i = check_field_exists(lyr_defn, STOP_NAME_FIELD)
+    if not field_exists:
+        raise ValueError("Can't build stop ID to name map for a "\
+            "stops layer that doesn't include a name field.")
+    stop_id_to_stop_name_map = {}
+    # Build mapping of osstip route id to gtfs route id
+    for stop in stops_lyr:
+        stop_id = stop.GetField(STOP_ID_FIELD)
+        stop_name = stop.GetField(STOP_NAME_FIELD)
+        stop_id_to_stop_name_map[stop_id] = stop_name
+    stops_lyr.ResetReading()
+    return stop_id_to_stop_name_map
+
 ###########################################################
 # Access functions for key properties of segment-stop info
 
@@ -173,27 +188,55 @@ def get_routes_on_seg(seg_feature):
     return rlist
 
 # These get() funcs below were originally in create_gtfs_from_basicinfo.py
-def get_stop_feature_name(feature, stop_prefix):
+def get_stop_feature_default_name(feature, stop_prefix):
+    """Note:- this returns the 'default' name for a stop, which is a mode
+    prefix followed by its ID, e.g. 'B45' :- not the actual
+    name stored in the stop name field."""
     stop_id = feature.GetField(STOP_NAME_FIELD)
     if stop_id is None:
-        stop_name = None
+        stop_def_name = None
     else:
         if type(stop_id) == str:
-            stop_name = stop_id
+            stop_def_name = stop_id
         else:    
-            stop_name = stop_prefix+str(int(stop_id))
-    return stop_name
+            stop_def_name = stop_prefix+str(int(stop_id))
+    return stop_def_name
 
-def get_stop_feature(stop_name, stops_lyr, stop_prefix):
+def get_stop_feature_with_default_name(stop_def_name, stops_lyr, stop_prefix):
     # Just do a linear search for now.
     match_feature = None
     for feature in stops_lyr:
         fname = get_stop_feature_name(feature, stop_prefix)
-        if fname == stop_name:
+        if fname == stop_def_name:
             match_feature = feature
             break;    
     stops_lyr.ResetReading()        
     return match_feature
+
+def get_stop_feature_with_name(stops_lyr, stop_name):
+    # Just do a linear search for now.
+    match_stop = None
+    for feature in stops_lyr:
+        fname = feature.GetField(STOP_NAME_FIELD)
+        if fname == stop_name:
+            match_stop = feature
+            break;
+    stops_lyr.ResetReading()
+    return match_stop
+
+def get_stop_id_with_name(stops_lyr, stop_name):
+    match_id = None
+    match_feat = get_stop_feature_with_name(stops_lyr, stop_name)       
+    if match_feat: 
+        match_id = match_feat.GetField(STOP_ID_FIELD)
+    return match_id
+
+def get_gtfs_stop_id_pair_of_segment(segment, stop_id_to_gtfs_id_map):
+    stop_a_id, stop_b_id = get_stop_ids_of_seg(segment)
+    gtfs_stop_a_id = stop_id_to_gtfs_id_map[stop_a_id]
+    gtfs_stop_b_id = stop_id_to_gtfs_id_map[stop_b_id]
+    gtfs_stop_ids_sorted = sorted([gtfs_stop_a_id, gtfs_stop_b_id])
+    return tuple(gtfs_stop_ids_sorted)
 
 def get_route_segment(segment_id, route_segments_lyr):
     # Just do a linear search for now.
@@ -402,7 +445,7 @@ def add_route_to_seg(segments_lyr, seg_feat, route_name):
     segments_lyr.SetFeature(seg_feat)
     return
 
-def stop_name_from_id(stop_id, mode_config):
+def stop_default_name_from_id(stop_id, mode_config):
     return "%s%d" % (mode_config['stop_prefix'], stop_id)
 
 def route_name_from_id(route_id, mode_config):
@@ -467,9 +510,9 @@ def add_segment(segs_lyr, seg_id, seg_routes, stop_a_id, stop_b_id,
     seg_feat.SetField(SEG_ID_FIELD, seg_id)
     seg_feat.SetField(SEG_ROUTE_LIST_FIELD, ",".join(map(str, seg_routes)))
     seg_feat.SetField(SEG_STOP_1_NAME_FIELD,
-        stop_name_from_id(stop_a_id, mode_config))
+        stop_default_name_from_id(stop_a_id, mode_config))
     seg_feat.SetField(SEG_STOP_2_NAME_FIELD,
-        stop_name_from_id(stop_b_id, mode_config))
+        stop_default_name_from_id(stop_b_id, mode_config))
     # Rounding to nearest meter below per convention.
     seg_feat.SetField(SEG_ROUTE_DIST_FIELD, "%.0f" % route_dist_on_seg)
     segs_lyr.CreateFeature(seg_feat)

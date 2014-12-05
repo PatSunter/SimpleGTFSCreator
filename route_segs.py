@@ -725,8 +725,10 @@ def create_basic_route_dir_names(all_segs_by_route, mode_config):
                     % r_id
                 sys.exit(1)    
 
-        first_stop_name = tp_model.stop_name_from_id(start_stop, mode_config) 
-        last_stop_name = tp_model.stop_name_from_id(end_stop, mode_config)
+        first_stop_name = tp_model.stop_default_name_from_id(start_stop,
+            mode_config) 
+        last_stop_name = tp_model.stop_default_name_from_id(end_stop,
+            mode_config)
         dir1 = "%s->%s" % (first_stop_name, last_stop_name)
         dir2 = "%s->%s" % (last_stop_name, first_stop_name)
         route_dir_names[r_id] = (dir1, dir2)
@@ -863,7 +865,7 @@ def read_route_defs(csv_file_name, do_sort=True):
             r_short_name = row['Route']
             r_long_name = None
         else:
-            r_id = row['route_id']
+            r_id = int(row['route_id'])
             r_short_name = row['route_short_name']
             if r_short_name == 'None' or len(r_short_name) == 0:
                 r_short_name = None
@@ -892,7 +894,10 @@ def read_route_defs(csv_file_name, do_sort=True):
     return route_defs
 
 def write_route_defs(csv_file_name, route_defs):
-    routesfile = open(csv_file_name, 'w')
+    if sys.version_info >= (3,0,0):
+        routesfile = open(csv_file_name, 'w', newline='')
+    else:
+        routesfile = open(csv_file_name, 'wb')
     rwriter = csv.writer(routesfile, delimiter=';')
     rwriter.writerow(ROUTE_CSV_HEADERS_01)
 
