@@ -188,6 +188,13 @@ def route_defs_match_statuses(route_def, route_def2):
         match_status = True
     return match_status
 
+def get_matching_route_defs(route_defs, search_route_def):
+    matching_route_defs = []
+    for rdef in route_defs:
+        if route_defs_match_statuses(rdef, search_route_def):
+            matching_route_defs.append(rdef)
+    return matching_route_defs
+
 def route_def_matches_gtfs_route(route_def, gtfs_route):
     match_statuses = []
     if route_def.id is not None:
@@ -772,6 +779,14 @@ def get_routes_and_segments(segs_lyr):
     #    print "For Route ID '%s': segments are %s" % (r_id, rsegs)    
     segs_lyr.ResetReading()
     return all_routes
+
+def get_all_seg_refs(segs_lyr):
+    all_seg_refs = []
+    for feature in segs_lyr:
+        seg_ref = seg_ref_from_feature(feature)
+        all_seg_refs.append(seg_ref)
+    segs_lyr.ResetReading()
+    return all_seg_refs
 
 def create_ordered_seg_refs_from_ids(ordered_seg_ids, segs_lookup_table):
     ordered_seg_refs = []
