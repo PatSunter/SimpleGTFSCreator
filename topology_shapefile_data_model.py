@@ -17,6 +17,10 @@ ROUTE_EXT_TYPE_FIELD = "Ext_Type"
 ROUTE_EXT_EXIST_S_NAME_FIELD = "Ext_s_name"
 ROUTE_EXT_EXIST_L_NAME_FIELD = "Ext_l_name"
 ROUTE_EXT_CONNECTING_STOP_FIELD = "Con_stop_i"
+ROUTE_EXT_FIRST_STOP_FIELD = "Fst_stop_i"
+ROUTE_EXT_UPD_S_NAME_FIELD = "upd_s_name"
+ROUTE_EXT_UPD_L_NAME_FIELD = "upd_l_name"
+ROUTE_EXT_UPD_DIR_NAME_FIELD = "upd_dir_n"
 
 ROUTE_EXT_TYPE_EXTENSION = "EXT"
 ROUTE_EXT_TYPE_NEW = "NEW"
@@ -263,14 +267,20 @@ def create_stops_shp_file_combined_from_existing(
             stop_feat.GetField(STOP_TYPE_FIELD),
             stop_feat.GetGeometryRef(),
             first_lyr_srs,
-            gtfs_id)
+            stop_name=stop_feat.GetField(STOP_NAME_FIELD),
+            gtfs_id=gtfs_id)
 
     second_lyr_srs = stops_lyr_2.GetSpatialRef()
     for stop_ii_second, stop_feat in enumerate(stops_lyr_2):
+        # In this case we're not sure all the optional fields exist.
         try:
             stop_type = stop_feat.GetField(STOP_TYPE_FIELD)
         except ValueError:
             stop_type = STOP_TYPE_NEW_EXTENDED
+        try:
+            stop_name = stop_feat.GetField(STOP_NAME_FIELD)
+        except ValueError:    
+            stop_name = None
         try:
             gtfs_id = stop_feat.GetField(STOP_GTFS_ID_FIELD)
         except ValueError:
@@ -279,7 +289,8 @@ def create_stops_shp_file_combined_from_existing(
             stop_type,
             stop_feat.GetGeometryRef(),
             second_lyr_srs,
-            gtfs_id)
+            stop_name=stop_name,
+            gtfs_id=gtfs_id)
     all_stops_multipoint.Destroy()
     return new_stops_shp_file, new_stops_lyr
 
@@ -317,14 +328,25 @@ def add_stop(stops_lyr, stops_multipoint, stop_type, stop_geom, src_srs,
     stop_feat.Destroy()
     return pt_id
 
-def get_stop_id_with_gtfs_id(stops_lyr, gtfs_id):
+def get_stop_id_with_gtfs_id(stops_lyr, search_gtfs_id):
     stop_id = None
     for stop_feat in stops_lyr:
         stop_gtfs_id = stop_feat.GetField(STOP_GTFS_ID_FIELD)
-        if stop_gtfs_id == search_gtfs_id:
+        if str(stop_gtfs_id) == str(search_gtfs_id):
             stop_id = stop_feat.GetField(STOP_ID_FIELD)
             break
-    return int(stop_id)
+    stops_lyr.ResetReading()
+    return stop_id
+
+def get_stop_with_id(stops_lyr, search_stop_id):
+    stop_id_to_return = None
+    for stop_feat in stops_lyr:
+        stop_id = stop_feat.GetField(ROUTE_EXT_ID_FIELD)
+        if str(stop_id) == str(search_stop_id):
+            stop_id_to_return = stop_id
+            break
+    stops_lyr.ResetReading()
+    return stop_id_to_return
 
 def create_segs_shp_file(segs_shp_file_name, speed_model,
         delete_existing=False):
@@ -454,3 +476,13 @@ def add_segment(segs_lyr, seg_id, seg_routes, stop_a_id, stop_b_id,
     seg_feat.Destroy()
     seg_geom2.Destroy()
     return seg_ii
+    
+def get_route_ext_with_id(route_exts_lyr, search_ext_id):
+    route_ext_to_return = None
+    for route_ext in route_exts_lyr:
+        ext_id = route_ext.GetField(ROUTE_EXT_ID_FIELD)
+        if str(ext_id) == str(search_ext_id):
+            route_ext_to_return = route_ext
+            break
+    route_exts_lyr.ResetReading()
+    return route_ext_to_return
