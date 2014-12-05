@@ -24,7 +24,7 @@ MIN_SEGMENT_LENGTH = 50.0
 #  make first stop based on ID, rather than location?
 def create_segments_along_route(rname, r_id, route_geom,
         input_stops_lyr, stops_near_route, stops_near_route_map,
-        all_seg_refs, first_stop_location=None):
+        all_seg_refs, warn_not_start_end=True):
     """Note: rname argument is purely for error message purposes."""
     seg_refs_this_route = []
     new_segs_cnt = 0
@@ -53,6 +53,7 @@ def create_segments_along_route(rname, r_id, route_geom,
     last_vertex_i = 0
     skipped_dist = 0
     last_stop_id_before_skipping = None
+
     while line_remains is True:
         # Pass in all_stop_is here, except the stop we just visited:
         # to allow for possibility of a route that visits the same stop
@@ -79,8 +80,9 @@ def create_segments_along_route(rname, r_id, route_geom,
                 last_stop_i = stops_near_route_map[last_stop_i_in_route_set]
                 last_stop = input_stops_lyr.GetFeature(last_stop_i)
                 try:
-                    if last_stop.GetField(tp_model.STOP_TYPE_FIELD) != \
-                            tp_model.STOP_TYPE_ROUTE_START_END:
+                    if warn_not_start_end and \
+                            last_stop.GetField(tp_model.STOP_TYPE_FIELD) != \
+                                tp_model.STOP_TYPE_ROUTE_START_END:
                         print "WARNING: for route %s, last stop found "\
                             "wasn't of type %s." % \
                             (rname, tp_model.STOP_TYPE_ROUTE_START_END)
