@@ -248,6 +248,20 @@ def get_route_segment(segment_id, route_segments_lyr):
     route_segments_lyr.ResetReading()        
     return match_feature
 
+def get_max_stop_gtfs_id(stops_lyr):
+    max_gtfs_id = -1
+    for stop_feat in stops_lyr:
+        try:
+            stop_gtfs_id = int(stop_feat.GetField(STOP_GTFS_ID_FIELD))
+        except ValueError:
+            continue
+        if stop_gtfs_id > max_gtfs_id:
+            max_gtfs_id = stop_gtfs_id
+    stops_lyr.ResetReading()
+    if max_gtfs_id == -1:
+        max_gtfs_id = None
+    return max_gtfs_id
+
 ################
 # Section below related to adding stops, routes, segments to shapefiles.
 
@@ -293,7 +307,8 @@ def create_stops_shp_file(stops_shp_file_name, delete_existing=False,
 def create_stops_shp_file_combined_from_existing(
         stops_shp_file_name,
         stops_lyr_1, stops_lyr_2,
-        delete_existing=False, gtfs_origin_field=False):
+        delete_existing=False, gtfs_origin_field=False,
+        auto_create_added_gtfs_ids=False):
     # First create empty new file
     new_stops_shp_file, new_stops_lyr = create_stops_shp_file(
         stops_shp_file_name, delete_existing=delete_existing,
@@ -312,6 +327,12 @@ def create_stops_shp_file_combined_from_existing(
             first_lyr_srs,
             stop_name=stop_feat.GetField(STOP_NAME_FIELD),
             gtfs_id=gtfs_id)
+    stops_lyr_1.ResetReading()
+
+    if auto_create_added_gtfs_ids:
+        max_gtfs_id_first = get_max_stop_gtfs_id(stops_lyr_1)
+        assert max_gtfs_id_first is not None
+        init_auto_added_gtfs_id = (int(max_gtfs_id_first / 1000) + 1) * 1000
 
     second_lyr_srs = stops_lyr_2.GetSpatialRef()
     for stop_ii_second, stop_feat in enumerate(stops_lyr_2):
@@ -324,16 +345,20 @@ def create_stops_shp_file_combined_from_existing(
             stop_name = stop_feat.GetField(STOP_NAME_FIELD)
         except ValueError:    
             stop_name = None
-        try:
-            gtfs_id = stop_feat.GetField(STOP_GTFS_ID_FIELD)
-        except ValueError:
-            gtfs_id = None
+        if not auto_create_added_gtfs_ids:
+            try:
+                gtfs_id = stop_feat.GetField(STOP_GTFS_ID_FIELD)
+            except ValueError:
+                gtfs_id = None
+        else:
+            gtfs_id = init_auto_added_gtfs_id + stop_ii_second
         add_stop(new_stops_lyr, all_stops_multipoint,
             stop_type,
             stop_feat.GetGeometryRef(),
             second_lyr_srs,
             stop_name=stop_name,
             gtfs_id=gtfs_id)
+    stops_lyr_2.ResetReading()
     all_stops_multipoint.Destroy()
     return new_stops_shp_file, new_stops_lyr
 

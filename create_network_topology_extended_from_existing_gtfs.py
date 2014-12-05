@@ -489,12 +489,15 @@ def main():
     output_stops_fname = options.output_stops
 
     # create combined stops shpfile here, to get IDs right etc,
+    # N.B.:- for now the auto create GTFS option is needed so
+    #  that these stops can be assigned a speed later.
     all_stops_shp_file, all_stops_lyr = \
         tp_model.create_stops_shp_file_combined_from_existing(
             output_stops_fname,
             existing_stops_lyr, ext_stops_lyr,
             delete_existing=DELETE_EXISTING, 
-            gtfs_origin_field=True)
+            gtfs_origin_field=True,
+            auto_create_added_gtfs_ids=True)
 
     route_ext_infos = read_route_ext_infos(route_exts_lyr)
     print "New /extended routes read in, defined as follows:"
