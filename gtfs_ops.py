@@ -793,8 +793,10 @@ def write_route_freq_info_by_time_periods_by_patterns(schedule, gtfs_route_id,
 
         for dir_period_pair, headways in pattern_hways.iteritems():
             route_dir, serv_period = dir_period_pair
-            fname = get_route_hways_for_pattern_fname(gtfs_route, p_ii,
-                route_dir, serv_period)
+            r_s_name = gtfs_route.route_short_name
+            r_l_name = gtfs_route.route_long_name
+            fname = tps_hways_model.get_route_hways_for_pattern_fname(
+                r_s_name, r_l_name, p_ii, route_dir, serv_period)
             fpath = os.path.join(output_path, fname)
             tps_hways_model.write_headways_minutes(stop_gtfs_ids_to_names_map, 
                 headways, time_periods, fpath, stop_id_order=stop_write_order)
@@ -814,8 +816,10 @@ def write_route_freq_info_by_time_periods_all_patterns(schedule, gtfs_route_id,
             (route_dir, serv_period)]
         stop_gtfs_ids_to_names_map = build_stop_gtfs_ids_to_names_map(
             schedule, stop_write_order)
+        r_s_name = gtfs_route.route_short_name
+        r_l_name = gtfs_route.route_long_name
         fname_all = tps_hways_model.get_route_hways_for_dir_period_fname(
-            gtfs_route, serv_period, route_dir)
+            r_s_name, r_l_name, serv_period, route_dir)
         fpath = os.path.join(output_path, fname_all)
         headways = route_hways_during_time_periods_all_patterns[\
             (route_dir, serv_period)]

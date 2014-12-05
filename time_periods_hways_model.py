@@ -6,19 +6,19 @@ import csv
 
 import misc_utils
 
-def get_route_hways_for_pattern_fname(gtfs_route, pattern_i,
-        route_dir, serv_period):
+def get_route_hways_for_pattern_fname(r_short_name, r_long_name,
+        pattern_i, route_dir, serv_period):
     rname_file_ready = misc_utils.routeNameFileReady(
-        gtfs_route.route_short_name, gtfs_route.route_long_name)
+        r_short_name, r_long_name)
     rdir_str = misc_utils.routeDirStringToFileReady(route_dir)
     fname = "%s-hways-p%d-%s-%s.csv" % \
         (rname_file_ready, pattern_i, rdir_str, serv_period)
     return fname 
 
-def get_route_hways_for_dir_period_fname(gtfs_route, serv_period,
-        route_dir):
+def get_route_hways_for_dir_period_fname(r_short_name, r_long_name,
+        serv_period, route_dir):
     rname_file_ready = misc_utils.routeNameFileReady(
-        gtfs_route.route_short_name, gtfs_route.route_long_name)
+        r_short_name, r_long_name)
     rdir_str = misc_utils.routeDirStringToFileReady(route_dir)
     fname = "%s-hways-%s-%s-all.csv" % \
         (rname_file_ready, serv_period, rdir_str)
@@ -51,8 +51,8 @@ def write_headways_minutes(stop_gtfs_ids_to_names_map, period_headways,
 AVG_HWAYS_ALL_STOPS_HDRS = ['route_id','route_short_name','route_long_name',\
     'serv_period','trips_dir']
 
-def write_route_hways_all_routes_all_stops(schedule, time_periods,
-        avg_hways_all_stops, output_fname, round_places=2):
+def write_route_hways_all_routes_all_stops(r_ids_to_names_map,
+        time_periods, avg_hways_all_stops, output_fname, round_places=2):
     print "Writing all route average headways in TPs to file %s ..." \
         % output_fname
     csv_file = open(output_fname, 'w')
@@ -61,9 +61,7 @@ def write_route_hways_all_routes_all_stops(schedule, time_periods,
     writer.writerow(AVG_HWAYS_ALL_STOPS_HDRS + period_names)
     for route_id, avg_hways_all_stops_by_serv_periods in \
             avg_hways_all_stops.iteritems():
-        gtfs_route = schedule.routes[route_id]    
-        r_short_name = gtfs_route.route_short_name
-        r_long_name = gtfs_route.route_long_name
+        r_short_name, r_long_name = r_ids_to_names_map[route_id]
         avg_hways_all_stops_by_sps_sorted = \
             sorted(avg_hways_all_stops_by_serv_periods.items(),
                 key=lambda x: x[0][1])

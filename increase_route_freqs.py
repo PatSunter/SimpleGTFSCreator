@@ -11,8 +11,9 @@ import glob
 from optparse import OptionParser
 from datetime import timedelta
 
-import gtfs_ops
 import parser_utils
+import misc_utils
+import time_periods_hways_model as tps_hways_model
 
 def decrease_hways_to_max_in_window(avg_hways_in_tps, tps, max_headway,
         time_window_start, time_window_end):
@@ -127,15 +128,15 @@ def main():
         csv_out_file = open(output_hways_fname, 'wb')
     writer = csv.writer(csv_out_file, delimiter=';')
 
-    r_id_i = gtfs_ops.AVG_HWAYS_ALL_STOPS_HDRS.index('route_id') 
-    sp_i = gtfs_ops.AVG_HWAYS_ALL_STOPS_HDRS.index('serv_period')
-    td_i = gtfs_ops.AVG_HWAYS_ALL_STOPS_HDRS.index('trips_dir')
+    r_id_i = tps_hways_model.AVG_HWAYS_ALL_STOPS_HDRS.index('route_id') 
+    sp_i = tps_hways_model.AVG_HWAYS_ALL_STOPS_HDRS.index('serv_period')
+    td_i = tps_hways_model.AVG_HWAYS_ALL_STOPS_HDRS.index('trips_dir')
 
     headers = reader.next()
     writer.writerow(headers)
-    n_base_cols = len(gtfs_ops.AVG_HWAYS_ALL_STOPS_HDRS) 
+    n_base_cols = len(tps_hways_model.AVG_HWAYS_ALL_STOPS_HDRS) 
     tp_strs = headers[n_base_cols:]
-    tps = gtfs_ops.get_time_periods_from_strings(tp_strs)
+    tps = misc_utils.get_time_periods_from_strings(tp_strs)
     prev_route_id = None
     serv_periods_read_by_route_id = {}
     trip_dirs_read_by_route_id = {}

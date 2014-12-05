@@ -88,7 +88,10 @@ def main():
         time_periods.append(tp)    
 
     avg_hways_all_stops = {}
-    for r_id in schedule.routes.iterkeys():
+    r_ids_to_names_map = {}
+    for r_id, route in schedule.routes.iteritems():
+        r_ids_to_names_map[r_id] = (route.route_short_name, \
+            route.route_long_name)
         hways_all_patterns, all_patterns_stop_orders = \
             gtfs_ops.extract_route_freq_info_by_time_periods_all_patterns(
                 schedule, r_id, time_periods)
@@ -97,7 +100,7 @@ def main():
                 hways_all_patterns)
         avg_hways_all_stops[r_id] = avg_hways_all_stops_this_route    
             
-    tps_hways_model.write_route_hways_all_routes_all_stops(schedule,
+    tps_hways_model.write_route_hways_all_routes_all_stops(r_ids_to_names_map,
         time_periods, avg_hways_all_stops, output_hways_fname, round_places)
     return
 

@@ -11,6 +11,7 @@ from osgeo import ogr, osr
 
 import route_segs
 import topology_shapefile_data_model as tp_model
+import time_periods_speeds_model as tps_speeds_model
 
 class SpeedModel:
     """A Class that handles the speed of segments, at different times :-
@@ -312,9 +313,8 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
                 itertools.product(serv_periods, route_def.dir_names):
             one_dir_opened = False
             try:
-                import gtfs_ops
                 time_periods, route_avg_speeds, seg_distances = \
-                    gtfs_ops.read_route_speed_info_by_time_periods(
+                    tps_speeds_model.read_route_speed_info_by_time_periods(
                         self.input_avg_speeds_dir, route_def.short_name,
                         route_def.long_name, serv_period,
                         trips_dir, sort_seg_stop_id_pairs=True)

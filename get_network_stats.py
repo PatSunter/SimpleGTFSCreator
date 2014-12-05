@@ -11,13 +11,13 @@ import operator
 from datetime import timedelta, time
 from optparse import OptionParser
 
+import misc_utils
 import parser_utils
 import route_segs
-import gtfs_ops
 import seg_speed_models
-import gtfs_ops
 import topology_shapefile_data_model as tp_model
 import mode_timetable_info as m_t_info
+import time_periods_hways_model as tps_hways_model
 
 # Length calculations:-
 
@@ -121,8 +121,8 @@ calc_vehicles_needed_for_route = \
 #    calc_vehicles_needed_for_route_conservative_bidir
 
 def format_timedelta_nicely(time_d):
-    total_secs = gtfs_ops.tdToSecs(time_d)
-    hours, rem_secs = divmod(total_secs, gtfs_ops.SECS_PER_HOUR)
+    total_secs = misc_utils.tdToSecs(time_d)
+    hours, rem_secs = divmod(total_secs, misc_utils.SECS_PER_HOUR)
     mins, secs = divmod(rem_secs, 60)
     return "%d:%02d:%04.1f" % (hours, mins, secs)
 
@@ -203,7 +203,12 @@ def get_all_route_infos(segs_lyr, stops_lyr, route_defs_csv_fname,
                     peak_serv_period_to_use = serv_period
                     peak_serv_period_i = serv_periods.index(serv_period)
                     break
-            assert peak_serv_period_i is not None
+            if peak_serv_period_i is None:
+                #E.g. this case arises for train lines only running on wkends.
+                #Fallback to the first period we have access to.
+                serv_period = avg_hways_for_route.keys()[0][1]
+                peak_serv_period_to_use = serv_period
+                peak_serv_period_i = serv_periods.index(serv_period)
             
         setup_success = seg_speed_model.setup_for_route(r_def,
             [peak_serv_period_to_use])
@@ -256,7 +261,7 @@ def get_all_route_infos(segs_lyr, stops_lyr, route_defs_csv_fname,
                 other_dir = r_def.dir_names[1-peak_busy_dir_id]
                 avg_hways_for_route_in_dir_period = \
                     avg_hways_for_route[(other_dir, serv_period_to_use)]
-            service_headways = gtfs_ops.get_tp_hways_tuples(
+            service_headways = tps_hways_model.get_tp_hways_tuples(
                 avg_hways_for_route_in_dir_period, hways_tps)
         peak_hways, peak_valid_time = \
             m_t_info.get_nearest_next_valid_freq_and_time(service_headways,
@@ -268,7 +273,7 @@ def get_all_route_infos(segs_lyr, stops_lyr, route_defs_csv_fname,
         route_hways_in_peak[r_id] = peak_hways
         route_trav_times[r_id] = route_trav_time
         route_avg_speeds[r_id] = route_lengths[r_id] \
-            / gtfs_ops.tdToHours(route_trav_time)
+            / misc_utils.tdToHours(route_trav_time)
         route_vehicles_needed[r_id], valid_trip_start_time = \
             calc_vehicles_needed_for_route(route_trav_time, service_headways)
 
@@ -355,7 +360,7 @@ def main():
             parser.error("Per-route headways file given '%s' doesn't exist." \
                 % per_route_hways)
         per_route_hways, hways_tps = \
-            gtfs_ops.read_route_hways_all_routes_all_stops(
+            tps_hways_model.read_route_hways_all_routes_all_stops(
                 per_route_hways_fname)
     else:
         per_route_hways = None

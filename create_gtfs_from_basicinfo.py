@@ -23,7 +23,7 @@ import mode_timetable_info as m_t_info
 import topology_shapefile_data_model as tp_model
 import route_segs
 import seg_speed_models
-import gtfs_ops
+import time_periods_hways_model as tps_hways_model
 
 # Will determine how much infor is printed.
 VERBOSE = False
@@ -309,7 +309,7 @@ def create_gtfs_trips_stoptimes_for_route(route_def, route_segments_shp,
                     other_dir = r_def.dir_names[1-dir_id]
                     avg_hways_for_route_in_dir_period = \
                         avg_hways_for_route[(other_dir, serv_period)]
-                serv_headways = gtfs_ops.get_tp_hways_tuples(\
+                serv_headways = tps_hways_model.get_tp_hways_tuples(\
                     avg_hways_for_route_in_dir_period, hways_tps)
                     
             assert serv_headways
@@ -482,7 +482,7 @@ def process_data(route_defs_csv_fname, input_segments_fname,
 
     if per_route_hways_fname:
         per_route_hways, hways_tps = \
-            gtfs_ops.read_route_hways_all_routes_all_stops(
+            tps_hways_model.read_route_hways_all_routes_all_stops(
                 per_route_hways_fname)
     else:
         per_route_hways = None
