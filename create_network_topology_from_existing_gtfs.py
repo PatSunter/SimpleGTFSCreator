@@ -65,7 +65,7 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id, r_id,
     master_dir = input_route_dirs[0]
 
     print 'Calculating full-stop pattern of segments for route id %s, "%s":' \
-        % (gtfs_route.route_id, gtfs_ops.get_route_print_name(gtfs_route))
+        % (gtfs_route.route_id, gtfs_ops.get_gtfs_route_print_name(gtfs_route))
     for trips in trip_dict.itervalues():
         # According to the API, all of these trips in this trip pattern
         # have the same stop pattern. So just look at first one here.
