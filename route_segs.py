@@ -10,6 +10,7 @@ import re
 import operator
 import itertools
 
+import misc_utils
 import topology_shapefile_data_model as tp_model
 
 ########
@@ -72,16 +73,34 @@ class Seg_Reference:
         else:
             self.routes = routes
         self.seg_ii = None    # Index into segments layer shapefile -
-    
+
+class Route_Ext_Info:
+    """Class for holding relevant info about extended routes."""
+    def __init__(self, ext_id, ext_name, ext_type,
+            exist_r_s_name, exist_r_l_name,
+            exist_r_connect_stop_gtfs_id, exist_r_first_stop_gtfs_id,
+            upd_r_short_name, upd_r_long_name, upd_dir_name):
+        self.ext_id = ext_id
+        self.ext_name = ext_name
+        self.ext_type = ext_type
+        self.exist_r_short_name = exist_r_s_name
+        self.exist_r_long_name = exist_r_l_name
+        self.exist_r_connect_stop_gtfs_id = exist_r_connect_stop_gtfs_id
+        self.exist_r_first_stop_gtfs_id = exist_r_first_stop_gtfs_id
+        self.upd_r_short_name = upd_r_short_name
+        self.upd_r_long_name = upd_r_long_name
+        self.upd_dir_name = upd_dir_name
+
+        assert ext_type in tp_model.ROUTE_EXT_ALL_TYPES
+        assert self.exist_r_connect_stop_gtfs_id is not None
+        if ext_type == tp_model.ROUTE_EXT_TYPE_NEW:
+            assert self.exist_r_first_stop_gtfs_id is not None
+        assert upd_dir_name
+        return
+
 def get_print_name(route_def):
-    print_name = ""
-    if route_def.short_name and route_def.short_name != "None":
-        print_name = route_def.short_name
-    if route_def.long_name and route_def.long_name != "None":
-        if not print_name:
-            print_name = route_def.long_name
-        else:
-            print_name += " (%s)" % route_def.long_name 
+    print_name = misc_utils.get_route_print_name(
+        route_def.short_name, route_def.long_name)
     return print_name
 
 def add_route_to_seg_ref(seg_ref, route_id):
@@ -320,7 +339,7 @@ def get_stop_ids_in_travel_dir(route_seg_refs, seg_ii, dir_index):
             stop_ids = get_stop_order(seg_ref,
                 route_seg_refs[seg_ii+1])
         else:
-            # Special case for last stop
+            # Special case for last seg - need to use prev seg.
             linking_id = find_linking_stop_id(seg_ref,
                 route_seg_refs[seg_ii-1])
             other_id = get_other_stop_id(seg_ref, linking_id)
@@ -330,11 +349,12 @@ def get_stop_ids_in_travel_dir(route_seg_refs, seg_ii, dir_index):
             stop_ids = get_stop_order(seg_ref, 
                 route_seg_refs[seg_ii-1])
         else:
-            # Special case for first stop
+            # Special case for first seg - need to use next seg.
             linking_id = find_linking_stop_id(seg_ref,
                 route_seg_refs[seg_ii+1])
             other_id = get_other_stop_id(seg_ref, linking_id)
-            stop_ids = (other_id, linking_id)
+            # Remember we're going 'backwards' in this case
+            stop_ids = (linking_id, other_id)
     return stop_ids
 
 def build_seg_links(route_seg_refs):
@@ -796,6 +816,41 @@ def seg_ref_from_feature(seg_feature):
         route_dist_on_seg=route_dist_on_seg, routes=seg_rlist)
     return seg_ref
 
+def route_ext_from_feature(route_ext_feat):
+    ext_id = route_ext_feat.GetField(tp_model.ROUTE_EXT_ID_FIELD)
+    ext_name = route_ext_feat.GetField(tp_model.ROUTE_EXT_NAME_FIELD)
+    ext_type = route_ext_feat.GetField(tp_model.ROUTE_EXT_TYPE_FIELD)
+    exist_r_s_name = \
+        route_ext_feat.GetField(tp_model.ROUTE_EXT_EXIST_S_NAME_FIELD)
+    exist_r_l_name = \
+        route_ext_feat.GetField(tp_model.ROUTE_EXT_EXIST_L_NAME_FIELD)
+    exist_r_connect_stop_gtfs_id = \
+        route_ext_feat.GetField(tp_model.ROUTE_EXT_CONNECTING_STOP_FIELD)
+    exist_r_first_stop_gtfs_id = \
+        route_ext_feat.GetField(tp_model.ROUTE_EXT_FIRST_STOP_FIELD)
+    if not exist_r_first_stop_gtfs_id:
+        exist_r_first_stop_gtfs_id = None
+    upd_r_short_name = \
+        route_ext_feat.GetField(tp_model.ROUTE_EXT_UPD_S_NAME_FIELD)
+    upd_r_long_name = \
+        route_ext_feat.GetField(tp_model.ROUTE_EXT_UPD_L_NAME_FIELD)
+    upd_dir_name = \
+        route_ext_feat.GetField(tp_model.ROUTE_EXT_UPD_DIR_NAME_FIELD)
+    route_ext_info = Route_Ext_Info(
+        ext_id, ext_name, ext_type,
+        exist_r_s_name, exist_r_l_name,
+        exist_r_connect_stop_gtfs_id, exist_r_first_stop_gtfs_id,
+        upd_r_short_name, upd_r_long_name, upd_dir_name)
+    return route_ext_info
+
+def read_route_ext_infos(route_exts_lyr):
+    route_ext_infos = []
+    for r_ext_i, route_ext_feat in enumerate(route_exts_lyr):
+        route_ext_info = route_ext_from_feature(route_ext_feat)
+        route_ext_infos.append(route_ext_info)
+    route_exts_lyr.ResetReading()
+    return route_ext_infos
+
 def get_routes_and_segments(segs_lyr):
     all_routes = {}
     for feature in segs_lyr:
@@ -854,6 +909,105 @@ def write_segments_to_shp_file(segments_lyr, input_stops_lyr, seg_refs,
             stop_feat_a, stop_feat_b, stops_srs, mode_config)
     print "...done writing."
     return
+
+############################
+# Route Ext Info processing.
+
+def print_route_ext_infos(route_ext_infos, indent=4):
+    for re in route_ext_infos:
+        print " " * indent + "Ext id:%s, '%s', of type %s"\
+            % (re.ext_id, re.ext_name, re.ext_type)
+        print " " * indent * 2 + "connects to existing route '%s' "\
+            "('%s'), at GTFS stop ID %s" \
+            % (re.exist_r_short_name, re.exist_r_long_name, \
+               re.exist_r_connect_stop_gtfs_id)
+        if re.ext_type == tp_model.ROUTE_EXT_TYPE_NEW:
+            print " " * indent * 2 + "(new route will copy starting from "\
+                "stop with GTFS ID %s)"\
+                % (re.exist_r_first_stop_gtfs_id)
+        print " " * indent * 2 + "will update r name to '%s':'%s' "\
+            "and new/updated dir name as '%s'." \
+            % (re.upd_r_short_name, re.upd_r_long_name, \
+               re.upd_dir_name)
+    return
+
+def get_matching_existing_route_info(
+        route_defs, segs_lyr, segs_lookup_table, stops_lyr,
+        route_ext_info):
+    # Find the route def, stops, etc of matching route in existing topology
+    search_route_def = Route_Def(
+        None, 
+        route_ext_info.exist_r_short_name,
+        route_ext_info.exist_r_long_name,
+        None, None)
+
+    matching_r_defs = get_matching_route_defs(route_defs,
+        search_route_def)
+    if len(matching_r_defs) == 0:
+        print "Error:- for route extension %s with s name %s, l name %s: "\
+            "no matching existing routes!" \
+            % (route_ext_info.ext_name, route_ext_info.exist_r_short_name,\
+               route_ext_info.exist_r_long_name)
+        sys.exit(1)
+    elif len(matching_r_defs) > 1:
+        print "Error:- for route extension %s with s name %s, l name %s: "\
+            "matched multiple existing routes!" \
+            % (route_ext_info.ext_name, route_ext_info.exist_r_short_name,\
+               route_ext_info.exist_r_long_name)
+        sys.exit(1)
+    r_def_to_extend = matching_r_defs[0]
+
+    seg_refs_along_route = create_ordered_seg_refs_from_ids(
+        r_def_to_extend.ordered_seg_ids, segs_lookup_table)
+    stop_ids_along_route = extract_stop_list_along_route(
+        seg_refs_along_route)
+    
+    connect_stop_id = tp_model.get_stop_id_with_gtfs_id(
+        stops_lyr, route_ext_info.exist_r_connect_stop_gtfs_id)
+
+    if connect_stop_id is None:
+        print "Error:- extension route with connecting stop spec. "\
+            "with GTFS ID %s :- couldn't find an existing stop with "\
+            "this GTFS ID."\
+            % (route_ext_info.exist_r_connect_stop_gtfs_id)
+        sys.exit()
+    elif connect_stop_id not in stop_ids_along_route:
+        print "Error:- extension route with connecting stop spec. "\
+            "with GTFS ID %s exists, but not found in route to extend." \
+            % (route_ext_info.exist_r_connect_stop_gtfs_id)
+        sys.exit()
+    
+    if route_ext_info.ext_type == tp_model.ROUTE_EXT_TYPE_EXTENSION:
+        if connect_stop_id == stop_ids_along_route[-1]:
+            ext_dir_id = 0
+        elif connect_stop_id == stop_ids_along_route[0]:
+            ext_dir_id = -1
+        else:
+            print "Error:- extension route with connecting stop spec. "\
+                "with GTFS ID %s not found at end of route to extend."\
+            % (route_ext_info.exist_r_connect_stop_gtfs_id)
+            sys.exit(1)
+    # For new routes, the connecting stop can legitimately be 
+    #  anywhere along the route.
+
+    orig_route_first_stop_id = tp_model.get_stop_id_with_gtfs_id(
+        stops_lyr, route_ext_info.exist_r_first_stop_gtfs_id)
+
+    return r_def_to_extend, seg_refs_along_route, stop_ids_along_route, \
+        connect_stop_id, orig_route_first_stop_id
+
+def get_route_infos_to_extend(route_ext_infos, route_defs, segs_lyr,
+        segs_lookup_table, stops_lyr):
+    """Returns the existing_route_infos_to_extend in the form:- 
+    (r_def_to_extend, seg_refs_along_route, stop_ids_along_route,
+      connect_stop_id)"""
+    existing_route_infos_to_extend = []
+    for r_ext_info in route_ext_infos:
+        route_info_to_extend = get_matching_existing_route_info(
+            route_defs, segs_lyr, segs_lookup_table, stops_lyr,
+            r_ext_info)
+        existing_route_infos_to_extend.append(route_info_to_extend)        
+    return existing_route_infos_to_extend     
 
 ###############################
 # I/O from route definition CSV
