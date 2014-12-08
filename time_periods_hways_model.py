@@ -55,7 +55,11 @@ def write_route_hways_all_routes_all_stops(r_ids_to_names_map,
         time_periods, avg_hways_all_stops, output_fname, round_places=2):
     print "Writing all route average headways in TPs to file %s ..." \
         % output_fname
-    csv_file = open(output_fname, 'w')
+    
+    if sys.version_info >= (3,0,0):
+        csv_file = open(output_fname, 'w', newline='')
+    else:
+        csv_file = open(output_fname, 'wb')
     writer = csv.writer(csv_file, delimiter=';')
     period_names = misc_utils.get_time_period_name_strings(time_periods)
     writer.writerow(AVG_HWAYS_ALL_STOPS_HDRS + period_names)
@@ -82,7 +86,10 @@ def read_route_hways_all_routes_all_stops(per_route_hways_fname):
     reader = csv.reader(csv_in_file, delimiter=';')
 
     avg_hways_all_stops = {}
+    r_ids_to_names_map = {}
     r_id_i = AVG_HWAYS_ALL_STOPS_HDRS.index('route_id')
+    r_s_name_i = AVG_HWAYS_ALL_STOPS_HDRS.index('route_short_name')
+    r_l_name_i = AVG_HWAYS_ALL_STOPS_HDRS.index('route_long_name')
     sp_i = AVG_HWAYS_ALL_STOPS_HDRS.index('serv_period')
     td_i = AVG_HWAYS_ALL_STOPS_HDRS.index('trips_dir')
     headers = reader.next()
@@ -91,6 +98,13 @@ def read_route_hways_all_routes_all_stops(per_route_hways_fname):
     tps = misc_utils.get_time_periods_from_strings(tp_strs)
     for row in reader:
         r_id = row[r_id_i]
+        r_short_name = row[r_s_name_i]
+        if not r_short_name:
+            r_short_name = None
+        r_long_name = row[r_l_name_i]
+        if not r_long_name:
+            r_long_name = None
+        r_ids_to_names_map[r_id] = r_short_name, r_long_name
         serv_period = row[sp_i]
         trips_dir = row[td_i]
         avg_hways_in_tps = map(float, row[n_base_cols:])
@@ -98,7 +112,7 @@ def read_route_hways_all_routes_all_stops(per_route_hways_fname):
             avg_hways_all_stops[r_id] = {}
         avg_hways_all_stops[r_id][(trips_dir,serv_period)] = avg_hways_in_tps
     csv_in_file.close()
-    return avg_hways_all_stops, tps
+    return avg_hways_all_stops, tps, r_ids_to_names_map
 
 def get_tp_hways_tuples(avg_hways_in_tps, time_periods, peak_status=True):
     """Assumes avg_hways_in_tps is in the form returned by func 
@@ -114,3 +128,16 @@ def get_tp_hways_tuples(avg_hways_in_tps, time_periods, peak_status=True):
         tp_hway_tuples.append(tp_hway_tuple)
     return tp_hway_tuples
 
+def decrease_hways_to_max_in_window(avg_hways_in_tps, tps, max_headway,
+        time_window_start, time_window_end):
+    avg_hways_in_tps_out = []
+    for tp_i, hway in enumerate(avg_hways_in_tps):
+        tp = tps[tp_i]
+        if tp[1] > time_window_start and tp[0] < time_window_end:
+            hway_out = min(hway, max_headway)
+            if hway_out <= 0:
+                hway_out = max_headway
+        else:
+            hway_out = hway
+        avg_hways_in_tps_out.append(hway_out)
+    return avg_hways_in_tps_out
