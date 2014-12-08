@@ -242,6 +242,15 @@ def get_gtfs_stop_id_pair_of_segment(segment, stop_id_to_gtfs_id_map,
         gtfs_stop_ids = (gtfs_stop_a_id, gtfs_stop_b_id)
     return tuple(gtfs_stop_ids)
 
+def get_gtfs_stop_ids(stop_ids, stop_id_to_gtfs_stop_id_map, to_str=True):
+    if not to_str:
+        gtfs_stop_ids = tuple([stop_id_to_gtfs_stop_id_map[s_id]\
+            for s_id in stop_ids])
+    else:
+        gtfs_stop_ids = tuple([str(stop_id_to_gtfs_stop_id_map[s_id])\
+            for s_id in stop_ids])
+    return gtfs_stop_ids
+
 def get_route_segment(segment_id, route_segments_lyr):
     # Just do a linear search for now.
     match_feature = None

@@ -19,15 +19,6 @@ import time_periods_speeds_model as tps_speeds_model
 # We don't want to further round down already rounded values.
 SPEED_ROUND_PLACES = 10
 
-def get_gtfs_ids(stop_ids, stop_id_to_gtfs_stop_id_map, to_str=True):
-    if not to_str:
-        gtfs_stop_ids = tuple([stop_id_to_gtfs_stop_id_map[s_id]\
-            for s_id in stop_ids])
-    else:
-        gtfs_stop_ids = tuple([str(stop_id_to_gtfs_stop_id_map[s_id])\
-            for s_id in stop_ids])
-    return gtfs_stop_ids
-
 # Example current input format of route_ext_specs list entry
 # (None,'Sunbury'     ,None,'Bacchus Marsh'   ,1218,'Bacchus Marsh'),
 
@@ -142,8 +133,8 @@ def create_new_speed_entries(route_defs, route_ext_specs, segs_lookup_table,
             while True:
                 stop_ids_ordered = route_segs.get_stop_ids_in_travel_dir(
                     ext_r_seg_refs, last_orig_seg_ref_ii, dir_index)
-                last_orig_seg_gtfs_ids = get_gtfs_ids(stop_ids_ordered,
-                    stop_id_to_gtfs_stop_id_map, to_str=True)
+                last_orig_seg_gtfs_ids = tp_model.get_gtfs_stop_ids(
+                    stop_ids_ordered, stop_id_to_gtfs_stop_id_map, to_str=True)
                 if last_orig_seg_gtfs_ids in gtfs_stop_pairs_this_file:
                     # Good have found default speeds entries to use.
                     break
@@ -168,13 +159,13 @@ def create_new_speed_entries(route_defs, route_ext_specs, segs_lookup_table,
                     last_orig_seg_ref_ii = conn_stop_ii - 1 - shifted_last
             route_avg_speeds_out = {}
             seg_distances_out = {}
-            for s_ii, seg_ref in enumerate(ext_r_seg_refs):
+            for seg_ii, seg_ref in enumerate(ext_r_seg_refs):
                 stop_ids_ordered = route_segs.get_stop_ids_in_travel_dir(
-                    ext_r_seg_refs, s_ii, dir_index)
-                seg_gtfs_ids = get_gtfs_ids(stop_ids_ordered,
+                    ext_r_seg_refs, seg_ii, dir_index)
+                seg_gtfs_ids = tp_model.get_gtfs_stop_ids(stop_ids_ordered,
                     stop_id_to_gtfs_stop_id_map, to_str=True)
-                if (starting_in_ext_section and s_ii < conn_stop_ii) or \
-                    (not starting_in_ext_section and s_ii >= conn_stop_ii):
+                if (starting_in_ext_section and seg_ii < conn_stop_ii) or \
+                    (not starting_in_ext_section and seg_ii >= conn_stop_ii):
                     # We are in an extended section:- need to copy speeds
                     # of closest existing
                     route_avg_speeds_out[seg_gtfs_ids] = \
