@@ -62,9 +62,10 @@ def write_route_hways_all_routes_all_stops(r_ids_to_names_map,
         csv_file = open(output_fname, 'wb')
     writer = csv.writer(csv_file, delimiter=';')
     period_names = misc_utils.get_time_period_name_strings(time_periods)
+    route_ids_sorted = sorted(avg_hways_all_stops.keys(), key=lambda x:int(x))
     writer.writerow(AVG_HWAYS_ALL_STOPS_HDRS + period_names)
-    for route_id, avg_hways_all_stops_by_serv_periods in \
-            avg_hways_all_stops.iteritems():
+    for route_id in route_ids_sorted:
+        avg_hways_all_stops_by_serv_periods = avg_hways_all_stops[route_id]
         r_short_name, r_long_name = r_ids_to_names_map[route_id]
         avg_hways_all_stops_by_sps_sorted = \
             sorted(avg_hways_all_stops_by_serv_periods.items(),
