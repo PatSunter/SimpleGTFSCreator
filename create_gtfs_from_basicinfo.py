@@ -306,7 +306,7 @@ def create_gtfs_trips_stoptimes_for_route(route_def, route_segments_shp,
                 except KeyError:
                     # In some cases for bus loops, we had to manually add a
                     # reverse dir, so try other one.
-                    other_dir = r_def.dir_names[1-dir_id]
+                    other_dir = route_def.dir_names[1 - dir_id]
                     avg_hways_for_route_in_dir_period = \
                         avg_hways_for_route[(other_dir, serv_period)]
                 serv_headways = tps_hways_model.get_tp_hways_tuples(\
@@ -481,7 +481,7 @@ def process_data(route_defs_csv_fname, input_segments_fname,
     seg_speed_model.setup(route_defs, segs_layer, stops_layer, mode_config)
 
     if per_route_hways_fname:
-        per_route_hways, hways_tps = \
+        per_route_hways, hways_tps, r_ids_to_names_map  = \
             tps_hways_model.read_route_hways_all_routes_all_stops(
                 per_route_hways_fname)
     else:
