@@ -6,7 +6,6 @@
 import os, sys
 import os.path
 import operator
-import csv
 from datetime import time, datetime, date, timedelta
 from optparse import OptionParser
 
