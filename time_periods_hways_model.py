@@ -65,13 +65,13 @@ def write_route_hways_all_routes_all_stops(r_ids_to_names_map,
     route_ids_sorted = sorted(avg_hways_all_stops.keys(), key=lambda x:int(x))
     writer.writerow(AVG_HWAYS_ALL_STOPS_HDRS + period_names)
     for route_id in route_ids_sorted:
-        avg_hways_all_stops_by_serv_periods = avg_hways_all_stops[route_id]
+        avg_hways_all_stops_by_dir_period_pairs = avg_hways_all_stops[route_id]
         r_short_name, r_long_name = r_ids_to_names_map[route_id]
-        avg_hways_all_stops_by_sps_sorted = \
-            sorted(avg_hways_all_stops_by_serv_periods.items(),
-                key=lambda x: x[0][1])
+        avg_hways_all_stops_by_dpps_sorted = \
+            sorted(avg_hways_all_stops_by_dir_period_pairs.items(),
+                key=lambda x: (x[0][1], x[0][0]))
         for dir_period_pair, avg_hways_in_tps in \
-                avg_hways_all_stops_by_sps_sorted:
+                avg_hways_all_stops_by_dpps_sorted:
             trips_dir = dir_period_pair[0]
             serv_period = dir_period_pair[1]
             avg_hways_in_tps_rnd = map(lambda x: round(x, round_places), \
