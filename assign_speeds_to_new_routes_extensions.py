@@ -19,10 +19,7 @@ import time_periods_speeds_model as tps_speeds_model
 # We don't want to further round down already rounded values.
 SPEED_ROUND_PLACES = 10
 
-# Example current input format of route_ext_specs list entry
-# (None,'Sunbury'     ,None,'Bacchus Marsh'   ,1218,'Bacchus Marsh'),
-
-def create_new_speed_entries(route_defs, route_ext_specs, segs_lookup_table,
+def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
         stop_id_to_gtfs_stop_id_map, stop_id_to_name_map,
         speeds_dir_in, speeds_dir_out):
 
@@ -32,7 +29,7 @@ def create_new_speed_entries(route_defs, route_ext_specs, segs_lookup_table,
     # Make a reverse map for lookup purposes
     gtfs_stop_id_to_stop_id_map = {}
     for stop_id, gtfs_stop_id in stop_id_to_gtfs_stop_id_map.iteritems():
-        gtfs_stop_id_to_stop_id_map[gtfs_stop_id] = stop_id
+        gtfs_stop_id_to_stop_id_map[str(gtfs_stop_id)] = stop_id
 
     routes_processed = {}
     for route_def in route_defs:
@@ -40,19 +37,21 @@ def create_new_speed_entries(route_defs, route_ext_specs, segs_lookup_table,
 
 
     print "Creating per-time period speed entries for the %d new/extended "\
-        "routes:" % len(route_ext_specs)
+        "routes:" % len(route_ext_defs)
     # Handle the new/extended routes first
-    for route_ext_spec in route_ext_specs:
-        old_r_s_name = route_ext_spec[0]
-        old_r_l_name = route_ext_spec[1]
-        ext_r_s_name, ext_r_l_name = route_ext_spec[2], route_ext_spec[3]
+    for route_ext_def in route_ext_defs:
+        old_r_s_name = route_ext_def.exist_r_short_name
+        old_r_l_name = route_ext_def.exist_r_long_name
+        ext_r_s_name = route_ext_def.upd_r_short_name
+        ext_r_l_name = route_ext_def.upd_r_long_name
+        
         print "\tProcessing new/extended route %s,\n\t  copying "\
             "pre-existing seg speeds from route %s" \
             % (misc_utils.get_route_print_name(ext_r_s_name, ext_r_l_name), \
                misc_utils.get_route_print_name(old_r_s_name, old_r_l_name))
                
-        conn_stop_gtfs_id = route_ext_spec[4]
-        upd_dir_name = route_ext_spec[5]
+        conn_stop_gtfs_id = route_ext_def.exist_r_connect_stop_gtfs_id
+        upd_dir_name = route_ext_def.upd_dir_name
 
         ext_route_spec = route_segs.Route_Def(None, ext_r_s_name, ext_r_l_name,
             None, None)
@@ -64,7 +63,7 @@ def create_new_speed_entries(route_defs, route_ext_specs, segs_lookup_table,
         other_dir_i = 1 - ext_route.dir_names.index(upd_dir_name)
         other_dir_name = ext_route.dir_names[other_dir_i]
 
-        conn_stop_id = gtfs_stop_id_to_stop_id_map[conn_stop_gtfs_id]
+        conn_stop_id = gtfs_stop_id_to_stop_id_map[str(conn_stop_gtfs_id)]
 
         ext_r_seg_refs = route_segs.create_ordered_seg_refs_from_ids(
             ext_route.ordered_seg_ids, segs_lookup_table)
@@ -110,6 +109,8 @@ def create_new_speed_entries(route_defs, route_ext_specs, segs_lookup_table,
             fname_sections = os.path.basename(route_speeds_fname).split('-')
             serv_period = fname_sections[2]
             trips_dir_file_ready = fname_sections[3]
+            print "\t  creating file for dir/period '%s', '%s':"\
+                % (trips_dir_file_ready, serv_period)
             time_periods, route_avg_speeds_in, seg_distances_in = \
                 tps_speeds_model.read_route_speed_info_by_time_periods(
                     speeds_dir_in, old_r_s_name, old_r_l_name,
@@ -197,7 +198,7 @@ def create_new_speed_entries(route_defs, route_ext_specs, segs_lookup_table,
         routes_processed[ext_route.id] = True
     n_reg_routes = sum([1 if p==False else 0 for p in \
         routes_processed.values()])
-    assert n_reg_routes + len(route_ext_specs) == len(routes_processed)
+    assert n_reg_routes + len(route_ext_defs) == len(routes_processed)
     print "Now copying per-time period speed entries for the remaining %d "\
         "regular routes." % (n_reg_routes)
     # Now copy all remaining route files
@@ -248,42 +249,28 @@ def main():
     mode_config = m_t_info.settings[options.service]
 
     route_defs = route_segs.read_route_defs(options.route_defs)
-    fname = os.path.expanduser(options.segments)
-    route_segments_shp = ogr.Open(fname, 0)    
-    if route_segments_shp is None:
-        print "Error, route segments shape file given, %s , failed to open." \
-            % (options.segments)
-        sys.exit(1)    
-    segs_lyr = route_segments_shp.GetLayer(0)
-    stops_shp = ogr.Open(options.stops)
-    stops_lyr = stops_shp.GetLayer(0)
 
-    # TODO read the route extensions info
+    segs_lyr, segs_shp = tp_model.open_check_shp_lyr(
+        options.segments, "route segments")
+    stops_lyr, stops_shp = tp_model.open_check_shp_lyr(
+        options.stops, "route stops")
+    route_exts_lyr, route_exts_shp = tp_model.open_check_shp_lyr(
+        options.route_extensions, "route extension geometries and specs")
 
-    route_ext_specs = [
-        (None,'Sunbury'     ,None,'Bacchus Marsh'   ,1218,'Bacchus Marsh'),
-        (None,'Cranbourne'  ,None,'Clyde (fmr. Cranbourne)',1045,'Clyde'),
-        ]
-
-    # Orig route :- short and long name
-    # Ext route :- short and long name
-    # (Remember, these could be None according to the spec, in which case,
-    #   use originals)
-    # Conn stop gtfs id
-    # Upd dir name.
-
+    route_ext_defs = route_segs.read_route_ext_infos(route_exts_lyr)
     segs_lookup_table = tp_model.build_segs_lookup_table(segs_lyr)
     stop_id_to_gtfs_stop_id_map = tp_model.build_stop_id_to_gtfs_stop_id_map(
         stops_lyr)
     stop_id_to_name_map = tp_model.build_stop_id_to_stop_name_map(stops_lyr)
 
-    create_new_speed_entries(route_defs, route_ext_specs, segs_lookup_table,
+    create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
         stop_id_to_gtfs_stop_id_map, stop_id_to_name_map,
         options.input_speeds_dir, options.output_speeds_dir)
 
-    # Close the shape files - includes making sure it writes
-    route_segments_shp.Destroy()
-    route_segments_shp = None
+    # Close the shape files
+    segs_shp.Destroy()
+    stops_shp.Destroy()
+    route_exts_shp.Destroy()
 
 if __name__ == "__main__":
     main()
