@@ -19,13 +19,13 @@ import create_network_topology_segments as create_segs
 DELETE_EXISTING = True
 
 def create_extended_route_def(r_def_to_extend, r_ext_info,
-        segs_lookup_table, ext_seg_refs):
+        exist_segs_lookup_table, ext_seg_refs):
     init_seg_ref_ids = r_def_to_extend.ordered_seg_ids
     ext_seg_ref_ids = map(operator.attrgetter('seg_id'), ext_seg_refs)
     # Ok:- we need to ensure connecting stop is at one of the ends,
     #  and update seg refs list appropriately.
     seg_refs_along_route = route_segs.create_ordered_seg_refs_from_ids(
-        init_seg_ref_ids, segs_lookup_table)
+        init_seg_ref_ids, exist_segs_lookup_table)
     stop_ids_along_route = route_segs.extract_stop_list_along_route(
         seg_refs_along_route)
     stop_ids_of_extension = route_segs.extract_stop_list_along_route(
@@ -172,6 +172,7 @@ def create_extended_topology( existing_route_defs, existing_segs_lyr,
         # Increase to next 1000.
         next_new_gtfs_r_id = (int(max_exist_gtfs_r_id / 1000) + 1) * 1000
 
+    new_ext_r_ids = []
     # OK, now actually process the route extension geometries, and then
     #  connect on to existing routes.
     for r_ext_info, existing_route_infos_to_extend in \
@@ -193,6 +194,7 @@ def create_extended_topology( existing_route_defs, existing_segs_lyr,
             r_id = r_def_to_extend.id
         else:
             assert 0
+        new_ext_r_ids.append(r_id)
 
         # Get geom, transform into right SRS for stops comparison, and get
         # nearby stops
@@ -210,13 +212,13 @@ def create_extended_topology( existing_route_defs, existing_segs_lyr,
                 "creating segments." % r_ext_info.ext_name
             sys.exit(1)
 
-        ext_seg_refs, new_seg_refs_cnt = \
+        new_ext_seg_refs, new_seg_refs_cnt = \
             create_segs.create_segments_along_route(
                 r_ext_info.ext_name, r_id, route_ext_geom, 
                 all_stops_lyr, stops_near_route, stops_near_route_map,
                 combined_seg_refs, warn_not_start_end=False)
 
-        if len(ext_seg_refs) == 0:
+        if len(new_ext_seg_refs) == 0:
             print "Error, no new route segments generated for the "\
                 "new/extended part of route extension %s."\
                 % r_ext_info.ext_name
@@ -226,17 +228,20 @@ def create_extended_topology( existing_route_defs, existing_segs_lyr,
             new_r_def = create_new_route_def_extend_existing(
                 r_def_to_extend, r_ext_info,
                 r_id, connecting_stop_id, orig_route_first_stop_id,
-                existing_segs_lookup_table, ext_seg_refs)
-            if auto_create_route_gtfs_ids:
-                new_r_def.gtfs_origin_id = next_new_gtfs_r_id
-                next_new_gtfs_r_id += 1
+                existing_segs_lookup_table, new_ext_seg_refs)
+        elif r_ext_info.ext_type == tp_model.ROUTE_EXT_TYPE_EXTENSION:
+            new_r_def = create_extended_route_def(r_def_to_extend, r_ext_info, 
+                existing_segs_lookup_table, new_ext_seg_refs)
+        else:
+            assert 0
+        
+        if auto_create_route_gtfs_ids:
+            new_r_def.gtfs_origin_id = next_new_gtfs_r_id
+            next_new_gtfs_r_id += 1
+    
+        if r_ext_info.ext_type == tp_model.ROUTE_EXT_TYPE_NEW:
             combined_route_defs.append(new_r_def)
         elif r_ext_info.ext_type == tp_model.ROUTE_EXT_TYPE_EXTENSION:
-            ext_r_def = create_extended_route_def(r_def_to_extend, r_ext_info, 
-                existing_segs_lookup_table, ext_seg_refs)
-            if auto_create_route_gtfs_ids:
-                ext_r_def.gtfs_origin_id = next_new_gtfs_r_id
-                next_new_gtfs_r_id += 1
             # Replace in the combined route defs
             to_replace_index = None
             for r_ii, r_def in enumerate(combined_route_defs):
@@ -244,18 +249,23 @@ def create_extended_topology( existing_route_defs, existing_segs_lyr,
                     to_replace_index = r_ii
                     break
             assert to_replace_index is not None
-            combined_route_defs[to_replace_index] = ext_r_def
+            combined_route_defs[to_replace_index] = new_r_def
         else:
             assert 0
         route_ext_feat.Destroy()
     stops_multipoint.Destroy()
+    # Set all the new seg refs to be part of the new routes.
+    # Only do this at the end since the list is being added to until now.
+    combined_seg_refs_lookup = route_segs.build_seg_refs_lookup_table(
+        combined_seg_refs)
+    for r_def in combined_route_defs:
+        r_id = r_def.id
+        if r_id in new_ext_r_ids:
+            for seg_id in r_def.ordered_seg_ids:
+                seg_ref = combined_seg_refs_lookup[seg_id]
+                route_segs.add_route_to_seg_ref(seg_ref, r_id)
+                
     return combined_route_defs, combined_seg_refs
-
-# Then, for each extended route geometry:-
-# Cool :- should then have an updated route_def, segments shpfile
-  # (And possibly stops shapefile, though shouldn't need to do this unless IDs
-  # change).
-  # :- which contains the 'extended routes'.
 
 def main():
     allowedServs = ', '.join(sorted(["'%s'" % key for key in \
