@@ -231,12 +231,16 @@ def get_stop_id_with_name(stops_lyr, stop_name):
         match_id = match_feat.GetField(STOP_ID_FIELD)
     return match_id
 
-def get_gtfs_stop_id_pair_of_segment(segment, stop_id_to_gtfs_id_map):
+def get_gtfs_stop_id_pair_of_segment(segment, stop_id_to_gtfs_id_map,
+        sort_stops=True):
     stop_a_id, stop_b_id = get_stop_ids_of_seg(segment)
     gtfs_stop_a_id = stop_id_to_gtfs_id_map[stop_a_id]
     gtfs_stop_b_id = stop_id_to_gtfs_id_map[stop_b_id]
-    gtfs_stop_ids_sorted = sorted([gtfs_stop_a_id, gtfs_stop_b_id])
-    return tuple(gtfs_stop_ids_sorted)
+    if sort_stops:
+        gtfs_stop_ids = sorted([gtfs_stop_a_id, gtfs_stop_b_id])
+    else:    
+        gtfs_stop_ids = (gtfs_stop_a_id, gtfs_stop_b_id)
+    return tuple(gtfs_stop_ids)
 
 def get_route_segment(segment_id, route_segments_lyr):
     # Just do a linear search for now.
