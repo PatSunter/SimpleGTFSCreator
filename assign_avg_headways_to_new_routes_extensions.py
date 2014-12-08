@@ -51,14 +51,29 @@ def create_new_avg_headway_entries(
 
         if route_ext_def.ext_type == tp_model.ROUTE_EXT_TYPE_EXTENSION:
             # Need to get the gtfs route ID of the old route.
-            old_r_id = None
+            old_gtfs_r_id = None
             for r_id, r_name_pair in r_ids_to_names_map.iteritems():
                 if old_r_s_name == r_name_pair[0] and \
                         old_r_l_name == r_name_pair[1]:
                     old_gtfs_r_id = r_id
                     break
-            avg_hways_all_stops_out[ext_gtfs_r_id] = \
-                avg_hways_all_stops_in[old_gtfs_r_id]
+            assert old_gtfs_r_id
+            upd_dir_name = route_ext_def.upd_dir_name
+            other_new_dir_i = 1 - ext_route.dir_names.index(upd_dir_name)
+            other_dir_name = ext_route.dir_names[other_new_dir_i]
+            old_dpps = avg_hways_all_stops_in[old_gtfs_r_id].keys()
+            old_dir_names = list(set(map(operator.itemgetter(0), old_dpps)))
+            rep_i = 1 - old_dir_names.index(other_dir_name)
+            replaced_dir_name = old_dir_names[rep_i]
+            avg_hways_all_stops_out[ext_gtfs_r_id] = {}
+            for serv_period in serv_periods:
+                dpp_1 = (other_dir_name, serv_period)
+                avg_hways_all_stops_out[ext_gtfs_r_id][dpp_1] = \
+                    avg_hways_all_stops_in[old_gtfs_r_id][dpp_1]
+                dpp_2_new = (upd_dir_name, serv_period)
+                dpp_2_old = (replaced_dir_name, serv_period)
+                avg_hways_all_stops_out[ext_gtfs_r_id][dpp_2_new] = \
+                    avg_hways_all_stops_in[old_gtfs_r_id][dpp_2_old]
         else:
             avg_hways_all_stops_out[ext_gtfs_r_id] = {}
             dir_period_pairs_needed = itertools.product(ext_route.dir_names,
