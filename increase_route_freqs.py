@@ -6,28 +6,15 @@
 import os, sys
 import os.path
 import operator
-import csv
-import glob
-from optparse import OptionParser
+import itertools
 from datetime import timedelta
+from optparse import OptionParser
 
 import parser_utils
 import misc_utils
 import time_periods_hways_model as tps_hways_model
 
-def decrease_hways_to_max_in_window(avg_hways_in_tps, tps, max_headway,
-        time_window_start, time_window_end):
-    avg_hways_in_tps_out = []
-    for tp_i, hway in enumerate(avg_hways_in_tps):
-        tp = tps[tp_i]
-        if tp[1] > time_window_start and tp[0] < time_window_end:
-            hway_out = min(hway, max_headway)
-            if hway_out <= 0:
-                hway_out = max_headway
-        else:
-            hway_out = hway
-        avg_hways_in_tps_out.append(hway_out)
-    return avg_hways_in_tps_out
+HEADWAYS_ROUND_PLACES=10
 
 def main():
     parser = OptionParser()
@@ -120,69 +107,47 @@ def main():
         % (max_headway, serv_periods_to_mod, options.time_window_start,\
            options.time_window_end)
 
-    csv_in_file = open(input_hways_fname, 'r')
-    reader = csv.reader(csv_in_file, delimiter=';')
-    if sys.version_info >= (3,0,0):
-        csv_out_file = open(output_hways_fname, 'w', newline='')
-    else:
-        csv_out_file = open(output_hways_fname, 'wb')
-    writer = csv.writer(csv_out_file, delimiter=';')
+    avg_hways_all_stops_in, tps, r_ids_to_names_map = \
+        tps_hways_model.read_route_hways_all_routes_all_stops(input_hways_fname)
 
-    r_id_i = tps_hways_model.AVG_HWAYS_ALL_STOPS_HDRS.index('route_id') 
-    sp_i = tps_hways_model.AVG_HWAYS_ALL_STOPS_HDRS.index('serv_period')
-    td_i = tps_hways_model.AVG_HWAYS_ALL_STOPS_HDRS.index('trips_dir')
+    avg_hways_all_stops_out = {}
+    for r_id, avg_hways_by_dir_period_in in avg_hways_all_stops_in.iteritems():
+        avg_hways_all_stops_out[r_id] = {}    
+        for dir_period_pair, avg_hways_in_tps_in in \
+                avg_hways_by_dir_period_in.iteritems():
+            sp = dir_period_pair[1]
+            if sp in serv_periods_to_mod:
+                avg_hways_in_tps_out = \
+                    tps_hways_model.decrease_hways_to_max_in_window(
+                        avg_hways_in_tps_in, tps, max_headway,
+                        time_window_start, time_window_end)
+            else:
+                # Don't modify in this case, we'll just copy.
+                avg_hways_in_tps_out = copy.copy(avg_hways_in_tps_in)
+            avg_hways_all_stops_out[r_id][dir_period_pair] = \
+                avg_hways_in_tps_out
+    # Now we potentially need to add missing headway entries
+    if add_missing_serv_periods:
+        null_hways = [-1] * len(tps)
+        max_hways_in_tps_out = tps_hways_model.decrease_hways_to_max_in_window(
+            null_hways, tps, max_headway, time_window_start, time_window_end)
+        for r_id, avg_hways_by_dir_period_out in \
+                avg_hways_all_stops_out.iteritems():
+            dir_period_pairs = avg_hways_by_dir_period_out.keys()
+            dirs_found = set(map(operator.itemgetter(0), dir_period_pairs))
+            dir_period_pairs_needed = itertools.product(dirs_found,
+                serv_periods_to_mod)
+            for dir_period_pair in dir_period_pairs_needed:
+                if dir_period_pair not in avg_hways_by_dir_period_out:
+                    avg_hways_by_dir_period_out[dir_period_pair] = \
+                        max_hways_in_tps_out
 
-    headers = reader.next()
-    writer.writerow(headers)
-    n_base_cols = len(tps_hways_model.AVG_HWAYS_ALL_STOPS_HDRS) 
-    tp_strs = headers[n_base_cols:]
-    tps = misc_utils.get_time_periods_from_strings(tp_strs)
-    prev_route_id = None
-    serv_periods_read_by_route_id = {}
-    trip_dirs_read_by_route_id = {}
-    for row in reader:
-        route_id = row[r_id_i]
-        serv_period = row[sp_i]
-        trips_dir = row[td_i]
-        if route_id not in serv_periods_read_by_route_id:
-            serv_periods_read_by_route_id[route_id] = set()
-        serv_periods_read_by_route_id[route_id].add(serv_period)
-        if route_id not in trip_dirs_read_by_route_id:
-            trip_dirs_read_by_route_id[route_id] = set()
-        trip_dirs_read_by_route_id[route_id].add(trips_dir)
-        if prev_route_id and add_missing_serv_periods \
-            and route_id != prev_route_id:
-            # Thw way conditional is written assumes all the route ID entries
-            # are read/written in order.
-            for sp in serv_periods_to_mod:
-                if sp not in serv_periods_read_by_route_id[prev_route_id]:
-                    # We need to write in rows for trips during these SPs, at
-                    #  the maxmimum headway.
-                    for trips_dir in trip_dirs_read_by_route_id[prev_route_id]:
-                        init_col_vals = prev_init_col_vals 
-                        init_col_vals[sp_i] = sp
-                        init_col_vals[td_i] = trips_dir
-                        null_hways = [-1] * len(tps)
-                        avg_hways_in_tps_out = decrease_hways_to_max_in_window(
-                            null_hways, tps, max_headway, time_window_start,
-                            time_window_end)
-                        writer.writerow(init_col_vals + avg_hways_in_tps_out)
-        if serv_period not in serv_periods_to_mod:
-            # Skip, which means write as-is to output.
-            writer.writerow(row)
-            continue
-        init_col_vals = row[:n_base_cols]
-        avg_hways_in_tps = map(float, row[n_base_cols:])
-        avg_hways_in_tps_out = decrease_hways_to_max_in_window(
-            avg_hways_in_tps, tps, max_headway, time_window_start,
-            time_window_end)
-        writer.writerow(init_col_vals + avg_hways_in_tps_out)
-        prev_route_id = route_id
-        prev_init_col_vals = init_col_vals
+    tps_hways_model.write_route_hways_all_routes_all_stops(r_ids_to_names_map,
+        tps, avg_hways_all_stops_out, output_hways_fname, 
+        round_places=HEADWAYS_ROUND_PLACES)
+
     print "...finished saving changed hways with to file %s" \
         % output_hways_fname
-    csv_in_file.close()
-    csv_out_file.close()
     return
 
 if __name__ == "__main__":
