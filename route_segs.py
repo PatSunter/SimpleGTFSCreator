@@ -141,6 +141,12 @@ def get_seg_ref_with_id(seg_id, seg_refs):
             return seg_ref
     return None
 
+def build_seg_refs_lookup_table(seg_refs):
+    seg_refs_lookup_table = {}
+    for seg_ref in seg_refs:
+        seg_refs_lookup_table[seg_ref.seg_id] = seg_ref
+    return seg_refs_lookup_table
+
 def find_seg_ref_matching_stops(all_seg_refs, stop_id_1, stop_id_2):
     matched_seg_ref = None
     for seg_ref in all_seg_refs:
