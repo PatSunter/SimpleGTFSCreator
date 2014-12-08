@@ -136,7 +136,8 @@ def create_new_route_def_extend_existing(r_def_to_extend, r_ext_info,
     return new_r_def
 
 def create_extended_topology( existing_route_defs, existing_segs_lyr,
-        all_stops_lyr, route_ext_infos, route_exts_lyr):
+        all_stops_lyr, route_ext_infos, route_exts_lyr,
+        auto_create_route_gtfs_ids=False):
 
     existing_segs_lookup_table = tp_model.build_segs_lookup_table(
         existing_segs_lyr)
@@ -164,6 +165,12 @@ def create_extended_topology( existing_route_defs, existing_segs_lyr,
 
     max_exist_r_id = max(map(lambda x: int(x.id), existing_route_defs))
     next_new_r_id = max_exist_r_id + 1
+
+    if auto_create_route_gtfs_ids:
+        max_exist_gtfs_r_id = max(map(lambda x: int(x.gtfs_origin_id),
+            existing_route_defs))
+        # Increase to next 1000.
+        next_new_gtfs_r_id = (int(max_exist_gtfs_r_id / 1000) + 1) * 1000
 
     # OK, now actually process the route extension geometries, and then
     #  connect on to existing routes.
@@ -220,10 +227,16 @@ def create_extended_topology( existing_route_defs, existing_segs_lyr,
                 r_def_to_extend, r_ext_info,
                 r_id, connecting_stop_id, orig_route_first_stop_id,
                 existing_segs_lookup_table, ext_seg_refs)
+            if auto_create_route_gtfs_ids:
+                new_r_def.gtfs_origin_id = next_new_gtfs_r_id
+                next_new_gtfs_r_id += 1
             combined_route_defs.append(new_r_def)
         elif r_ext_info.ext_type == tp_model.ROUTE_EXT_TYPE_EXTENSION:
             ext_r_def = create_extended_route_def(r_def_to_extend, r_ext_info, 
                 existing_segs_lookup_table, ext_seg_refs)
+            if auto_create_route_gtfs_ids:
+                ext_r_def.gtfs_origin_id = next_new_gtfs_r_id
+                next_new_gtfs_r_id += 1
             # Replace in the combined route defs
             to_replace_index = None
             for r_ii, r_def in enumerate(combined_route_defs):
@@ -344,7 +357,8 @@ def main():
     # Now create extended segments and route defs
     output_route_defs, all_seg_refs = create_extended_topology(
         existing_route_defs, existing_segs_lyr, all_stops_lyr,
-        route_ext_infos, route_exts_lyr)
+        route_ext_infos, route_exts_lyr,
+        auto_create_route_gtfs_ids=True)
 
     # Write out the (extended/added) per-route definition lists
     print "Now writing out extended route defs to %s:" \
