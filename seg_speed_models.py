@@ -292,7 +292,8 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
         self._curr_time_periods = None
         self._curr_route_def = None
         self._curr_route_seg_speeds = None
-        self.stop_id_to_gtfs_id_map = None
+        self._stop_id_to_gtfs_stop_id_map = None
+        self._segs_lookup_table = None
 
     def add_extra_needed_speed_fields(self, segments_layer):
         # override to do nothing :- we don't store anything on segs lyr,
@@ -300,13 +301,18 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
         return
 
     def setup(self, route_defs, segs_layer, stops_layer, mode_config):
-        self.stop_id_to_gtfs_id_map = \
+        self._stop_id_to_gtfs_stop_id_map = \
             tp_model.build_stop_id_to_gtfs_stop_id_map(stops_layer)
+        # NOTE: This is not ideal to have to keep this open. Implies the
+        #  segs_layer isn't altered/closed while the seg_speed_model is working.
+        self._segs_lookup_table = tp_model.build_segs_lookup_table(segs_layer)
         return
 
     def setup_for_route(self, route_def, serv_periods):
         success_flag = True
         self._curr_route_def = route_def
+        self._curr_route_seg_refs = route_segs.create_ordered_seg_refs_from_ids(
+            route_def.ordered_seg_ids, self._segs_lookup_table)
         self._curr_route_seg_speeds = {}
         self._curr_time_periods = {}
         for serv_period, trips_dir in \
@@ -349,9 +355,12 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
     def save_extra_seg_speed_info(self, next_segment, serv_period, travel_dir):
         # We will look up relevant data for current serv period and direction,
         #  and save.
-        gtfs_stop_pair = tp_model.get_gtfs_stop_id_pair_of_segment(next_segment,
-            self.stop_id_to_gtfs_id_map)
-        gtfs_stop_pair = tuple([str(gtfs_id) for gtfs_id in gtfs_stop_pair])
+        seg_ref = route_segs.seg_ref_from_feature(next_segment)
+        seg_ii = self._curr_route_def.ordered_seg_ids.index(seg_ref.seg_id)
+        stop_ids_ordered = route_segs.get_stop_ids_in_travel_dir(
+            self._curr_route_seg_refs, seg_ii, travel_dir)
+        gtfs_stop_pair = tp_model.get_gtfs_stop_ids(stop_ids_ordered,
+            self._stop_id_to_gtfs_stop_id_map, to_str=True)
         dir_name = self._curr_route_def.dir_names[travel_dir]
         tps = None
         tp_speeds = None
@@ -363,6 +372,13 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
             # Fall-back to searching all the other days and directions.
             for dir_period_pair, sp_dir_speeds \
                     in self._curr_route_seg_speeds.iteritems():
+                # Need to recalc gtfs_stop_pair to be in order of dir_period_pair
+                curr_dir_name = dir_period_pair[0]
+                curr_dir_i = self._curr_route_def.dir_names.index(curr_dir_name)
+                curr_stop_ids = route_segs.get_stop_ids_in_travel_dir(
+                    self._curr_route_seg_refs, seg_ii, curr_dir_i)
+                gtfs_stop_pair = tp_model.get_gtfs_stop_ids(curr_stop_ids,
+                    self._stop_id_to_gtfs_stop_id_map, to_str=True)
                 try:
                     tps = self._curr_time_periods[dir_period_pair]
                     tp_speeds = sp_dir_speeds[gtfs_stop_pair]
@@ -371,6 +387,7 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
                 else:
                     # We've got a workable speed set to use.
                     break    
+
         if not tp_speeds and tps:
             print "While curr_route is id %s, name %s:- "\
                 "Error for segment %s: can't find a matching set of "\
@@ -378,8 +395,7 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
                 "GTFS ids of stops are %s and %s." \
                 % (self._curr_route_def.id, \
                    route_segs.get_print_name(self._curr_route_def), \
-                   next_segment.GetField(tp_model.SEG_ID_FIELD), \
-                   gtfs_stop_pair[0], gtfs_stop_pair[1])
+                   seg_ref.seg_id, gtfs_stop_pair[0], gtfs_stop_pair[1])
             assert tp_speeds and tps
         speed_ext = MultipleTimePeriodsPerRouteSegSpeedInfo(tps, tp_speeds)
         return speed_ext
