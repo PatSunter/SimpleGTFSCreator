@@ -367,8 +367,14 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
         try:
             tps = self._curr_time_periods[(dir_name,serv_period)]
             sp_dir_speeds = self._curr_route_seg_speeds[(dir_name,serv_period)]
-            tp_speeds = sp_dir_speeds[gtfs_stop_pair]
-        except KeyError:    
+            try:
+                tp_speeds = sp_dir_speeds[gtfs_stop_pair]
+            except KeyError:
+                # TODO First fallback is to try reverse direction at same
+                #  segment.
+                tp_speeds = sp_dir_speeds[tuple(reversed(gtfs_stop_pair))]
+        # TODO:- above statement has thrown with logic of try-excepts ...
+        except KeyError:
             # Fall-back to searching all the other days and directions.
             for dir_period_pair, sp_dir_speeds \
                     in self._curr_route_seg_speeds.iteritems():
