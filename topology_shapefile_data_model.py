@@ -54,8 +54,26 @@ STOP_TYPE_FILLERS = "FILLERS"
 STOP_TYPE_FROM_EXISTING_GTFS = "FROM_EXISTING_GTFS"
 STOP_TYPE_NEW_EXTENDED = "NEW_EXTENDED_ROUTE"
 
+##################
+# IO Helpers
+
+def open_check_shp_lyr(shp_filename, shp_description):
+    if not shp_filename:
+        print "Error, needed shape file of %s was given an empty path " \
+            "string." % (shp_description)
+        sys.exit(1)
+    full_fname = os.path.expanduser(shp_filename)
+    shp = osgeo.ogr.Open(full_fname, 0)
+    if shp is None:
+        print "Error, needed shape file of %s with given path %s failed "\
+        "to open." % (shp_description, shp_filename)
+        sys.exit(1)
+    lyr = shp.GetLayer(0)    
+    return lyr, shp
+
 #################
 # Low-level functions to add new fields or check required ones exist.
+
 def check_field_exists(lyr_defn, field_name):
     field_match = False
     field_i = None
