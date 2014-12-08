@@ -362,42 +362,14 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
         gtfs_stop_pair = tp_model.get_gtfs_stop_ids(stop_ids_ordered,
             self._stop_id_to_gtfs_stop_id_map, to_str=True)
         dir_name = self._curr_route_def.dir_names[travel_dir]
-        tps = None
-        tp_speeds = None
-        try:
-            tps = self._curr_time_periods[(dir_name,serv_period)]
-            sp_dir_speeds = self._curr_route_seg_speeds[(dir_name,serv_period)]
-            try:
-                tp_speeds = sp_dir_speeds[gtfs_stop_pair]
-            except KeyError:
-                # TODO First fallback is to try reverse direction at same
-                #  segment.
-                tp_speeds = sp_dir_speeds[tuple(reversed(gtfs_stop_pair))]
-        # TODO:- above statement has thrown with logic of try-excepts ...
-        except KeyError:
-            # Fall-back to searching all the other days and directions.
-            for dir_period_pair, sp_dir_speeds \
-                    in self._curr_route_seg_speeds.iteritems():
-                # Need to recalc gtfs_stop_pair to be in order of dir_period_pair
-                curr_dir_name = dir_period_pair[0]
-                curr_dir_i = self._curr_route_def.dir_names.index(curr_dir_name)
-                curr_stop_ids = route_segs.get_stop_ids_in_travel_dir(
-                    self._curr_route_seg_refs, seg_ii, curr_dir_i)
-                gtfs_stop_pair = tp_model.get_gtfs_stop_ids(curr_stop_ids,
-                    self._stop_id_to_gtfs_stop_id_map, to_str=True)
-                try:
-                    tps = self._curr_time_periods[dir_period_pair]
-                    tp_speeds = sp_dir_speeds[gtfs_stop_pair]
-                except KeyError:
-                    continue
-                else:
-                    # We've got a workable speed set to use.
-                    break    
+  
+        tp_speeds, tps = self._get_speeds_on_seg_in_period(
+            (dir_name, serv_period), gtfs_stop_pair, seg_ii)
 
         if not tp_speeds and tps:
             print "While curr_route is id %s, name %s:- "\
                 "Error for segment %s: can't find a matching set of "\
-                "avg speeds for this segment in any service period. "\
+                "avg speeds for this segment in any allowed service period. "\
                 "GTFS ids of stops are %s and %s." \
                 % (self._curr_route_def.id, \
                    route_segs.get_print_name(self._curr_route_def), \
@@ -427,3 +399,61 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
         tp_speeds = seg_speed_info.time_period_speeds
         seg_speed = find_valid_speed_nearest_to_period(tp_speeds, tp_i)
         return seg_speed
+
+    def _get_speeds_on_seg_in_period(self, dir_period_pair, seg_gtfs_stop_ids,
+            seg_ii, allow_rev_order_fallback=True,
+            allow_other_dpp_fallback=True):
+        tps = None
+        tp_speeds = None
+
+        speeds_in_dpp_found = False
+        try:
+            tps = self._curr_time_periods[dir_period_pair]
+            sp_dir_speeds = self._curr_route_seg_speeds[dir_period_pair]
+        except KeyError:
+            speeds_in_dpp_found = False
+        else:
+            speeds_in_dpp_found = True
+
+        if speeds_in_dpp_found:
+            try:
+                tp_speeds = sp_dir_speeds[seg_gtfs_stop_ids]
+            except KeyError:
+                if allow_rev_order_fallback:
+                    # try reverse direction of segment stops
+                    # in same dir period pair (e.g. trains in city loop)
+                    try:
+                        rev_gtfs_ids = tuple(reversed(seg_gtfs_stop_ids))
+                        tp_speeds = sp_dir_speeds[rev_gtfs_ids]
+                    except KeyError:
+                        pass
+
+        if not tp_speeds and allow_other_dpp_fallback:
+            # Fall-back to searching all the other days and directions.
+            for dir_period_pair_b, sp_dir_speeds \
+                    in self._curr_route_seg_speeds.iteritems():
+                # Need to recalc seg_gtfs_stop_ids to be in order of dir_period_pair
+                curr_dir_name = dir_period_pair_b[0]
+                curr_dir_i = self._curr_route_def.dir_names.index(curr_dir_name)
+                curr_stop_ids = route_segs.get_stop_ids_in_travel_dir(
+                    self._curr_route_seg_refs, seg_ii, curr_dir_i)
+                curr_gtfs_stop_ids = tp_model.get_gtfs_stop_ids(curr_stop_ids,
+                    self._stop_id_to_gtfs_stop_id_map, to_str=True)
+                tps = self._curr_time_periods[dir_period_pair_b]
+                try:
+                    tp_speeds = sp_dir_speeds[curr_gtfs_stop_ids]
+                except KeyError:
+                    if allow_rev_order_fallback:
+                        # also try reversed order in this DPP
+                        try:
+                            curr_rev_gtfs_ids = tuple(reversed(curr_gtfs_stop_ids))
+                            tp_speeds = sp_dir_speeds[curr_rev_gtfs_ids]
+                        except KeyError:
+                            continue
+                        else:
+                            break
+                else:
+                    # We've got a workable speed set to use.
+                    break
+
+        return tp_speeds, tps
