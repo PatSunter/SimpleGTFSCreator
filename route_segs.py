@@ -309,6 +309,34 @@ def get_stop_order(seg_ref, next_seg_ref):
         second_stop_id = linking_stop_id
     return first_stop_id, second_stop_id
 
+def get_stop_ids_in_travel_dir(route_seg_refs, seg_ii, dir_index):
+    """Returns the stop ids of segment ii in route_route_seg_refs given
+    order of travel by dir_index. (Assumes route_seg_refs ordered in
+    direction of travel of dir_index 0.)"""
+    seg_ref = route_seg_refs[seg_ii]
+    assert seg_ii >= 0 and seg_ii <= len(route_seg_refs) - 1
+    if dir_index == 0:
+        if seg_ii < len(route_seg_refs) - 1:
+            stop_ids = get_stop_order(seg_ref,
+                route_seg_refs[seg_ii+1])
+        else:
+            # Special case for last stop
+            linking_id = find_linking_stop_id(seg_ref,
+                route_seg_refs[seg_ii-1])
+            other_id = get_other_stop_id(seg_ref, linking_id)
+            stop_ids = (linking_id, other_id)
+    else:    
+        if seg_ii > 0:
+            stop_ids = get_stop_order(seg_ref, 
+                route_seg_refs[seg_ii-1])
+        else:
+            # Special case for first stop
+            linking_id = find_linking_stop_id(seg_ref,
+                route_seg_refs[seg_ii+1])
+            other_id = get_other_stop_id(seg_ref, linking_id)
+            stop_ids = (other_id, linking_id)
+    return stop_ids
+
 def build_seg_links(route_seg_refs):
     """Create a dictionary, which for each segment ID, gives the list 
     of other segments linked to that id via a common stop."""
