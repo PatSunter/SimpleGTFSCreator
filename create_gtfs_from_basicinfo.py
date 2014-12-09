@@ -505,20 +505,20 @@ def process_data(route_defs_csv_fname, input_segments_fname,
     trips_total = 0
     for ii, r_start in enumerate(range(0, len(route_defs), \
             route_write_batch_size)):
+        r_end = r_start + (route_write_batch_size-1)
+        if r_end >= len(route_defs):
+            r_end = len(route_defs) - 1
+        print "Processing routes %d to %d" % (r_start, r_end)
         # Create our schedule
         schedule = transitfeed.Schedule(memory_db=memory_db)
         # Agency
         schedule.AddAgency(mode_config['name'], mode_config['url'],
             mode_config['loc'], agency_id=mode_config['id'])
         create_gtfs_service_periods(mode_config['services_info'], schedule)
-        route_id_to_gtfs_route_id_map = create_gtfs_route_entries(route_defs,
-            mode_config, schedule)
+        route_id_to_gtfs_route_id_map = create_gtfs_route_entries(
+            route_defs[r_start:r_end+1], mode_config, schedule)
         stop_id_to_gtfs_stop_id_map = create_gtfs_stop_entries(stops_shp,
             mode_config, schedule)
-        r_end = r_start + (route_write_batch_size-1)
-        if r_end >= len(route_defs):
-            r_end = len(route_defs)-1
-        print "Processing routes %d to %d" % (r_start, r_end)
         create_gtfs_trips_stoptimes(route_defs[r_start:r_end+1],
             route_segments_shp, stops_shp, mode_config, schedule,
             seg_speed_model, route_id_to_gtfs_route_id_map,
@@ -555,7 +555,6 @@ def process_data(route_defs_csv_fname, input_segments_fname,
         # Now close the shape files.
         stops_shp = None
         route_segments_shp = None
-
         # Load it up progressively from partial files.
         for fname in partial_save_files:
             loader = transitfeed.Loader(feed_path=fname,
