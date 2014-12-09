@@ -366,7 +366,7 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
         tp_speeds, tps = self._get_speeds_on_seg_in_period(
             (dir_name, serv_period), gtfs_stop_pair, seg_ii)
 
-        if not tp_speeds and tps:
+        if not (tp_speeds and tps):
             print "While curr_route is id %s, name %s:- "\
                 "Error for segment %s: can't find a matching set of "\
                 "avg speeds for this segment in any allowed service period. "\
@@ -432,7 +432,8 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
             # Fall-back to searching all the other days and directions.
             for dir_period_pair_b, sp_dir_speeds \
                     in self._curr_route_seg_speeds.iteritems():
-                # Need to recalc seg_gtfs_stop_ids to be in order of dir_period_pair
+                # Need to recalc seg_gtfs_stop_ids to be in order
+                # of dir_period_pair
                 curr_dir_name = dir_period_pair_b[0]
                 curr_dir_i = self._curr_route_def.dir_names.index(curr_dir_name)
                 curr_stop_ids = route_segs.get_stop_ids_in_travel_dir(
@@ -446,7 +447,8 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
                     if allow_rev_order_fallback:
                         # also try reversed order in this DPP
                         try:
-                            curr_rev_gtfs_ids = tuple(reversed(curr_gtfs_stop_ids))
+                            curr_rev_gtfs_ids = tuple(
+                                reversed(curr_gtfs_stop_ids))
                             tp_speeds = sp_dir_speeds[curr_rev_gtfs_ids]
                         except KeyError:
                             continue
