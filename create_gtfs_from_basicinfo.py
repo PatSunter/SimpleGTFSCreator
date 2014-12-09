@@ -160,12 +160,19 @@ def create_gtfs_stop_entries(stops_shapefile, mode_config, schedule):
     stop_prefix = mode_config['stop_prefix']
     for stop_cnt, stop_feature in enumerate(layer):
         
-        #stop_name = stop_feature.GetField('Name')
-        # For BZE's "Interchange" stops file
         stop_id = stop_feature.GetField(tp_model.STOP_ID_FIELD)
         if stop_id is None:
             continue
-        stop_name = stop_prefix + str(int(stop_id))
+        stop_name = None
+        try:
+            stop_name = stop_feature.GetField(tp_model.STOP_NAME_FIELD)
+        except ValueError:
+            pass
+        if not stop_name:
+            # This will catch empty stop names also.
+            stop_name = tp_model.get_stop_feature_default_name(stop_feature,
+                stop_prefix)
+        assert stop_name
         stop_desc = None
         stop_code = None
         stop_id_gtfs = str(mode_config['index'] + stop_cnt)
