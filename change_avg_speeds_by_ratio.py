@@ -13,6 +13,8 @@ from optparse import OptionParser
 import misc_utils
 import time_periods_speeds_model as tps_speeds_model
 
+SPEED_ROUND_PLACES = 3
+
 def main():
     parser = OptionParser()
     parser.add_option('--input_dir_speeds', dest='input_dir_speeds',
@@ -56,37 +58,40 @@ def main():
     for ii, csv_speeds_in_fname in enumerate(glob.glob("%s%s*speeds*.csv" \
             % (input_dir_speeds, os.sep))):
         #print "Reading speeds in file %s" % csv_speeds_in_fname
-        safe_path_in = misc_utils.get_win_safe_path(csv_speeds_in_fname)
-        csv_in_file = open(safe_path_in, 'r')
-        reader = csv.reader(csv_in_file, delimiter=';')
-        csv_speeds_out_fname = os.path.join(output_dir_speeds,
-            os.path.basename(csv_speeds_in_fname))
-        safe_path_out = misc_utils.get_win_safe_path(csv_speeds_out_fname)
-        if sys.version_info >= (3,0,0):
-            csv_out_file = open(safe_path_out, 'w', newline='')
-        else:
-            csv_out_file = open(safe_path_out, 'wb')
-        writer = csv.writer(csv_out_file, delimiter=';')
+        fname_sections = os.path.basename(csv_speeds_in_fname).split('-')
+        serv_period = fname_sections[-3]
+        trips_dir_file_ready = fname_sections[-2]
+        name_b = fname_sections[-5]
+        try:
+            name_a = fname_sections[-6]
+        except IndexError:
+            name_a = None
+        time_periods, route_avg_speeds_in, seg_distances_in, \
+                stop_gtfs_ids_to_names_map = \
+            tps_speeds_model.read_route_speed_info_by_time_periods(
+                input_dir_speeds, name_a, name_b,
+                serv_period, trips_dir_file_ready,
+                sort_seg_stop_id_pairs=False)
 
-        headers = reader.next()
-        writer.writerow(headers)
-        for row in reader:
-            n_base_cols = len(tps_speeds_model.AVG_SPEED_HEADERS) 
-            init_col_vals = row[:n_base_cols]
-            speeds_in_tps = map(float, row[n_base_cols:])
+        route_avg_speeds_out = {}
+        for gtfs_stop_id_pair, avg_speeds in route_avg_speeds_in.iteritems():
             speeds_in_tps_out = []
-            for sp in speeds_in_tps:
+            for sp in avg_speeds:
                 if sp > 0:
                     sp_out = sp * speed_ratio
                 else:
                     sp_out = sp
                 speeds_in_tps_out.append(sp_out)
-            writer.writerow(init_col_vals + speeds_in_tps_out)
-        #print "...finished saving changed speeds by ratio to file %s" \
-        #    % csv_speeds_out_fname
-        csv_in_file.close()
-        csv_out_file.close()
+            route_avg_speeds_out[gtfs_stop_id_pair] = speeds_in_tps_out
 
+        out_fname = \
+            tps_speeds_model.get_route_avg_speeds_for_dir_period_fname(
+                name_a, name_b, serv_period, trips_dir_file_ready)
+        out_fpath = os.path.join(output_dir_speeds, out_fname)
+        tps_speeds_model.write_avg_speeds_on_segments(
+            stop_gtfs_ids_to_names_map,
+            route_avg_speeds_out, seg_distances_in,
+            time_periods, out_fpath, SPEED_ROUND_PLACES)    
     print "... done (read and wrote %d speed spec files)." % (ii+1)
     return
 
