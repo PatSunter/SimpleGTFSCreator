@@ -19,6 +19,7 @@ from osgeo import ogr
 import transitfeed
 
 import parser_utils
+import misc_utils
 import mode_timetable_info as m_t_info
 import topology_shapefile_data_model as tp_model
 import route_segs
@@ -293,7 +294,12 @@ def create_gtfs_trips_stoptimes_for_route(route_def, route_segments_shp,
         serv_periods = sorted(set(map(operator.itemgetter(1), 
             avg_hways_for_route.keys())))
 
-    seg_speed_model.setup_for_route(route_def, serv_periods)
+    rsetup_status = seg_speed_model.setup_for_route(route_def, serv_periods)
+    if not rsetup_status:
+        print "Error:- failed to setup speed model for route %s - exiting." \
+            % misc_utils.get_route_print_name(route_def.short_name, \
+               route_def.long_name)
+        sys.exit(1)
 
     # For our basic scheduler, we're going to just create both trips in
     # both directions, starting at exactly the same time, at the same
