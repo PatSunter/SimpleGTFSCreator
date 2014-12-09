@@ -209,8 +209,15 @@ def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
             route_speeds_fnames = glob.glob(
                 "%s%s%s-speeds-*-all.csv" % (speeds_dir_in, os.sep, \
                     route_print_name))
+            # For why the prefix in copy, its a problem with Windows path
+            # lengths :- http://stackoverflow.com/questions/14075465/copy-a-file-with-a-too-long-path-to-another-directory-in-python
             for speeds_fname in route_speeds_fnames:
-                shutil.copy(speeds_fname, speeds_dir_out)
+                # Found by experiment had to do abspath twice.
+                # Weird, maybe because of the double-slash.
+                abs_path_in = os.path.abspath(os.path.abspath(speeds_fname))
+                abs_path_out = os.path.abspath(speeds_dir_out)
+                shutil.copy("\\\\?\\" + abs_path_in,
+                    "\\\\?\\" + abs_path_out)
     print "...done."
     return
 
