@@ -98,22 +98,46 @@ def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
             s_name = stop_id_to_name_map[s_id]
             stop_gtfs_ids_to_names_map[s_gtfs_id] = s_name
 
-        # Now process all the existing speeds files for this route (or
-        #  its old name), and make copies.
+        # The match depends on if we've specified both old route short
+        # and long names. If only one specified, need looser search.
         old_route_print_name = misc_utils.routeNameFileReady(
             old_r_s_name, old_r_l_name)
-        route_speeds_fnames = glob.glob(
-            "%s%s%s-speeds-*-all.csv" % (speeds_dir_in, os.sep, \
-                old_route_print_name))
+        match_exp = None
+        if old_r_s_name and old_r_l_name:
+            match_exp = "%s%s%s-speeds-*-all.csv" \
+                % (speeds_dir_in, os.sep, old_route_print_name)
+        elif old_r_s_name:
+            match_exp = "%s%s%s*-speeds-*-all.csv" \
+                % (speeds_dir_in, os.sep, old_route_print_name)
+        elif old_r_l_name:            
+            match_exp = "%s%s*%s-speeds-*-all.csv" \
+                % (speeds_dir_in, os.sep, old_route_print_name)
+        route_speeds_fnames = glob.glob(match_exp)
+        assert len(route_speeds_fnames) >= 1
+
+        # Now process all the existing speeds files for this route (or
+        #  its old name), and make copies.
         for route_speeds_fname in route_speeds_fnames:
             fname_sections = os.path.basename(route_speeds_fname).split('-')
-            serv_period = fname_sections[2]
-            trips_dir_file_ready = fname_sections[3]
+            # Index from the back, as name used depends on if 
+            # both short and long name specified.
+            serv_period = fname_sections[-3]
+            trips_dir_file_ready = fname_sections[-2]
+            if old_r_s_name and old_r_l_name:
+                name_a = old_r_s_name
+                name_b = old_r_l_name
+            else:
+                # We need to get these from the file.
+                name_b = fname_sections[-5]
+                try:
+                    name_a = fname_sections[-6]
+                except KeyError:
+                    name_a = None
             print "\t  creating file for dir/period '%s', '%s':"\
                 % (trips_dir_file_ready, serv_period)
             time_periods, route_avg_speeds_in, seg_distances_in = \
                 tps_speeds_model.read_route_speed_info_by_time_periods(
-                    speeds_dir_in, old_r_s_name, old_r_l_name,
+                    speeds_dir_in, name_a, name_b,
                     serv_period, trips_dir_file_ready,
                     sort_seg_stop_id_pairs=False)
             # We need to calc connecting stop order here, as looking it up 
@@ -187,9 +211,10 @@ def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
                         # origin. If so, we just don't copy.
                         pass
             # write out these new speeds to new file
-            out_fname = tps_speeds_model.get_route_avg_speeds_for_dir_period_fname(
-                ext_route.short_name, ext_route.long_name,
-                serv_period, working_dir_name)
+            out_fname = \
+                tps_speeds_model.get_route_avg_speeds_for_dir_period_fname(
+                    ext_route.short_name, ext_route.long_name,
+                    serv_period, working_dir_name)
             out_fpath = os.path.join(speeds_dir_out, out_fname)
             tps_speeds_model.write_avg_speeds_on_segments(
                 stop_gtfs_ids_to_names_map,
