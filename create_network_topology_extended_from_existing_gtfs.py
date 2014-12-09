@@ -356,6 +356,7 @@ def main():
         tp_model.create_stops_shp_file_combined_from_existing(
             output_stops_fname,
             existing_stops_lyr, ext_stops_lyr,
+            mode_config,
             delete_existing=DELETE_EXISTING, 
             gtfs_origin_field=True,
             auto_create_added_gtfs_ids=True)

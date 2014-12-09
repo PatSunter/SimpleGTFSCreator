@@ -21,7 +21,8 @@ from misc_utils import pairs
 
 DELETE_EXISTING = True
 
-def add_all_stops_from_gtfs(schedule, stops_lyr, stops_multipoint):
+def add_all_stops_from_gtfs(schedule, stops_lyr, stops_multipoint,
+        mode_config):
     print "Adding all stops from GTFS file."
     gtfs_srs = osr.SpatialReference()
     gtfs_srs.ImportFromEPSG(gtfs_ops.GTFS_EPSG)
@@ -33,7 +34,8 @@ def add_all_stops_from_gtfs(schedule, stops_lyr, stops_multipoint):
         stop_pt = ogr.Geometry(ogr.wkbPoint)
         stop_pt.AddPoint(gtfs_stop.stop_lon, gtfs_stop.stop_lat)
         stop_id = tp_model.add_stop(stops_lyr, stops_multipoint,
-            tp_model.STOP_TYPE_FROM_EXISTING_GTFS, stop_pt, gtfs_srs,
+            tp_model.STOP_TYPE_FROM_EXISTING_GTFS, stop_pt, 
+            gtfs_srs, mode_config,
             stop_name=gtfs_stop.stop_name, gtfs_id=gtfs_stop.stop_id)
         gtfs_stop_id_to_stop_id_map[gtfs_stop.stop_id] = stop_id    
         stop_count += 1
@@ -346,7 +348,7 @@ def main():
     # Now read out stops and segments from GTFS :- converting the multiple
     #  patterns per route in GTFS if necessary into a 'full-stop pattern'.
     gtfs_stop_id_to_stop_id_map = add_all_stops_from_gtfs(schedule,
-        stops_lyr, stops_multipoint)
+        stops_lyr, stops_multipoint, mode_config)
     route_defs, all_segs = get_route_defs_and_segments_from_gtfs(schedule,
         segments_lyr, stops_lyr, gtfs_stop_id_to_stop_id_map, mode_config,
         line_start_stop_info)

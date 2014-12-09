@@ -337,7 +337,7 @@ def create_stops_shp_file(stops_shp_file_name, delete_existing=False,
 
 def create_stops_shp_file_combined_from_existing(
         stops_shp_file_name,
-        stops_lyr_1, stops_lyr_2,
+        stops_lyr_1, stops_lyr_2, mode_config,
         delete_existing=False, gtfs_origin_field=False,
         auto_create_added_gtfs_ids=False):
     # First create empty new file
@@ -356,6 +356,7 @@ def create_stops_shp_file_combined_from_existing(
             stop_feat.GetField(STOP_TYPE_FIELD),
             stop_feat.GetGeometryRef(),
             first_lyr_srs,
+            mode_config,
             stop_name=stop_feat.GetField(STOP_NAME_FIELD),
             gtfs_id=gtfs_id)
     stops_lyr_1.ResetReading()
@@ -387,6 +388,7 @@ def create_stops_shp_file_combined_from_existing(
             stop_type,
             stop_feat.GetGeometryRef(),
             second_lyr_srs,
+            mode_config,
             stop_name=stop_name,
             gtfs_id=gtfs_id)
     stops_lyr_2.ResetReading()
@@ -394,7 +396,7 @@ def create_stops_shp_file_combined_from_existing(
     return new_stops_shp_file, new_stops_lyr
 
 def add_stop(stops_lyr, stops_multipoint, stop_type, stop_geom, src_srs,
-        stop_name=None, gtfs_id=None):
+        mode_config, stop_name=None, gtfs_id=None):
     """Adds a stop to stops_lyr, and also its geometry to stops_multipoint. 
     In the case of stops_lyr, the new stops' geometry will be re-projected into
     the SRS of that layer before adding (hence need to pass srs_srs as an
@@ -417,7 +419,9 @@ def add_stop(stops_lyr, stops_multipoint, stop_type, stop_geom, src_srs,
     stop_feat.SetGeometry(stop_geom2)
     stop_feat.SetField(STOP_ID_FIELD, pt_id)
     if stop_name == None:
-        stop_feat.SetField(STOP_NAME_FIELD, str(pt_id))
+        def_stop_name = stop_default_name_from_id(pt_id,
+            mode_config)
+        stop_feat.SetField(STOP_NAME_FIELD, def_stop_name)
     else:
         stop_feat.SetField(STOP_NAME_FIELD, str(stop_name))
     stop_feat.SetField(STOP_TYPE_FIELD, stop_type)
