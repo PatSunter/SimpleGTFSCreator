@@ -337,8 +337,8 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
                 self._curr_route_seg_speeds[(trips_dir, serv_period)] = \
                     route_avg_speeds        
                 self._curr_time_periods[(trips_dir, serv_period)] = time_periods
-            if not one_dir_opened:
-                success_flag = False
+        if not one_dir_opened:
+            success_flag = False
         return success_flag
 
     def setup_for_trip_set(self, route_def, serv_period, dir_id):
