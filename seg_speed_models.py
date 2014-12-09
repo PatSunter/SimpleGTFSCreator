@@ -315,9 +315,9 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
             route_def.ordered_seg_ids, self._segs_lookup_table)
         self._curr_route_seg_speeds = {}
         self._curr_time_periods = {}
+        at_least_one_dir_opened = False
         for serv_period, trips_dir in \
                 itertools.product(serv_periods, route_def.dir_names):
-            one_dir_opened = False
             try:
                 time_periods, route_avg_speeds, seg_distances = \
                     tps_speeds_model.read_route_speed_info_by_time_periods(
@@ -333,11 +333,11 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
                 #       serv_period)
                 continue    
             else:
-                one_dir_opened = True
+                at_least_one_dir_opened = True
                 self._curr_route_seg_speeds[(trips_dir, serv_period)] = \
                     route_avg_speeds        
                 self._curr_time_periods[(trips_dir, serv_period)] = time_periods
-        if not one_dir_opened:
+        if not at_least_one_dir_opened:
             success_flag = False
         return success_flag
 
