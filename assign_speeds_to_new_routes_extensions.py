@@ -137,7 +137,7 @@ def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
                 name_b = fname_sections[-5]
                 try:
                     name_a = fname_sections[-6]
-                except KeyError:
+                except IndexError:
                     name_a = None
             print "\t  creating file for dir/period '%s', '%s':"\
                 % (trips_dir_file_ready, serv_period)
