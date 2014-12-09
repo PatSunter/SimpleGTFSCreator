@@ -210,8 +210,8 @@ def get_stop_feature_default_name(feature, stop_prefix):
     """Note:- this returns the 'default' name for a stop, which is a mode
     prefix followed by its ID, e.g. 'B45' :- not the actual
     name stored in the stop name field."""
-    stop_id = feature.GetField(STOP_NAME_FIELD)
-    if stop_id is None:
+    stop_id = feature.GetField(STOP_ID_FIELD)
+    if not stop_id:
         stop_def_name = None
     else:
         if type(stop_id) == str:
