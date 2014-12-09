@@ -57,10 +57,12 @@ def read_route_speed_info_by_time_periods(read_dir, r_short_name, r_long_name,
     fname_all = get_route_avg_speeds_for_dir_period_fname(
         r_short_name, r_long_name, serv_period, trips_dir)
     fpath = os.path.join(read_dir, fname_all)
-    time_periods, r_avg_speeds_on_segs, seg_distances = \
+    time_periods, r_avg_speeds_on_segs, seg_distances, \
+        stop_gtfs_ids_to_names_map = \
         read_avg_speeds_on_segments(fpath, sort_seg_stop_id_pairs)
 
-    return time_periods, r_avg_speeds_on_segs, seg_distances        
+    return time_periods, r_avg_speeds_on_segs, seg_distances, \
+        stop_gtfs_ids_to_names_map
 
 def read_avg_speeds_on_segments(csv_fname, sort_seg_stop_id_pairs=False):
     safe_fpath = misc_utils.get_win_safe_path(csv_fname)
@@ -74,12 +76,21 @@ def read_avg_speeds_on_segments(csv_fname, sort_seg_stop_id_pairs=False):
     dist_row_i = AVG_SPEED_HEADERS.index('seg_dist_m')
     stop_a_id_i = AVG_SPEED_HEADERS.index('Stop_a_id')
     stop_b_id_i = AVG_SPEED_HEADERS.index('Stop_b_id')
+    stop_a_name_i = AVG_SPEED_HEADERS.index('Stop_a_name')
+    stop_b_name_i = AVG_SPEED_HEADERS.index('Stop_b_name')
 
     seg_distances = {}
     r_avg_speeds_on_segs = {}
+    stop_gtfs_ids_to_names_map = {}
     for row in reader:
         stop_a_id = row[stop_a_id_i]
         stop_b_id = row[stop_b_id_i]
+        stop_a_name = row[stop_a_name_i]
+        stop_b_name = row[stop_b_name_i]
+        if not stop_a_name: stop_a_name = None
+        if not stop_b_name: stop_b_name = None
+        stop_gtfs_ids_to_names_map[int(stop_a_id)] = stop_a_name
+        stop_gtfs_ids_to_names_map[int(stop_b_id)] = stop_b_name
         stop_ids = stop_a_id, stop_b_id
         if sort_seg_stop_id_pairs:
             stop_ids = tuple(map(str, sorted(map(int, stop_ids))))
@@ -87,5 +98,6 @@ def read_avg_speeds_on_segments(csv_fname, sort_seg_stop_id_pairs=False):
         speeds_in_tps = map(float, row[len(AVG_SPEED_HEADERS):])
         r_avg_speeds_on_segs[stop_ids] = speeds_in_tps
     csv_file.close()
-    return time_periods, r_avg_speeds_on_segs, seg_distances 
+    return time_periods, r_avg_speeds_on_segs, seg_distances, \
+        stop_gtfs_ids_to_names_map
 

@@ -319,7 +319,7 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
         for serv_period, trips_dir in \
                 itertools.product(serv_periods, route_def.dir_names):
             try:
-                time_periods, route_avg_speeds, seg_distances = \
+                time_periods, route_avg_speeds, seg_distances, null = \
                     tps_speeds_model.read_route_speed_info_by_time_periods(
                         self.input_avg_speeds_dir, route_def.short_name,
                         route_def.long_name, serv_period,

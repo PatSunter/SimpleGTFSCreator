@@ -141,7 +141,7 @@ def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
                     name_a = None
             print "\t  creating file for dir/period '%s', '%s':"\
                 % (trips_dir_file_ready, serv_period)
-            time_periods, route_avg_speeds_in, seg_distances_in = \
+            time_periods, route_avg_speeds_in, seg_distances_in, null = \
                 tps_speeds_model.read_route_speed_info_by_time_periods(
                     speeds_dir_in, name_a, name_b,
                     serv_period, trips_dir_file_ready,
