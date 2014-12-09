@@ -39,6 +39,20 @@ def create_new_avg_headway_entries(
         old_r_l_name = route_ext_def.exist_r_long_name
         ext_r_s_name = route_ext_def.upd_r_short_name
         ext_r_l_name = route_ext_def.upd_r_long_name
+
+        # Need to get the gtfs route ID, and names, of the old route.
+        old_gtfs_r_id = None
+        old_r_s_name_found, old_r_l_name_found = None, None
+        for r_id, r_name_pair in r_ids_to_names_map.iteritems():
+            if (old_r_s_name or old_r_l_name) and \
+                  (not old_r_s_name or old_r_s_name == r_name_pair[0]) \
+                   and (not old_r_l_name or old_r_l_name == r_name_pair[1]):
+                old_gtfs_r_id = r_id
+                old_r_s_name_found = r_name_pair[0]
+                old_r_l_name_found = r_name_pair[1]
+                break
+        assert old_gtfs_r_id
+
         ext_route_spec = route_segs.Route_Def(None, ext_r_s_name, ext_r_l_name,
             None, None)
         ext_routes = route_segs.get_matching_route_defs(route_defs,
@@ -47,26 +61,25 @@ def create_new_avg_headway_entries(
         ext_route = ext_routes[0]
 
         ext_gtfs_r_id = ext_route.gtfs_origin_id
-        r_ids_to_names_map[ext_gtfs_r_id] = (ext_r_s_name, ext_r_l_name)
+        r_s_name_out = ext_r_s_name
+        r_l_name_out = ext_r_l_name
+        if not r_s_name_out:
+            r_s_name_out = old_r_s_name_found
+        if not r_l_name_out:
+            r_l_name_out = old_r_l_name_found
+        r_ids_to_names_map[ext_gtfs_r_id] = (r_s_name_out, r_l_name_out)
 
         if route_ext_def.ext_type == tp_model.ROUTE_EXT_TYPE_EXTENSION:
-            # Need to get the gtfs route ID of the old route.
-            old_gtfs_r_id = None
-            for r_id, r_name_pair in r_ids_to_names_map.iteritems():
-                if old_r_s_name == r_name_pair[0] and \
-                        old_r_l_name == r_name_pair[1]:
-                    old_gtfs_r_id = r_id
-                    break
-            assert old_gtfs_r_id
             upd_dir_name = route_ext_def.upd_dir_name
             other_new_dir_i = 1 - ext_route.dir_names.index(upd_dir_name)
             other_dir_name = ext_route.dir_names[other_new_dir_i]
             old_dpps = avg_hways_all_stops_in[old_gtfs_r_id].keys()
+            old_serv_periods = list(set(map(operator.itemgetter(1), old_dpps)))
             old_dir_names = list(set(map(operator.itemgetter(0), old_dpps)))
             rep_i = 1 - old_dir_names.index(other_dir_name)
             replaced_dir_name = old_dir_names[rep_i]
             avg_hways_all_stops_out[ext_gtfs_r_id] = {}
-            for serv_period in serv_periods:
+            for serv_period in old_serv_periods:
                 dpp_1 = (other_dir_name, serv_period)
                 avg_hways_all_stops_out[ext_gtfs_r_id][dpp_1] = \
                     avg_hways_all_stops_in[old_gtfs_r_id][dpp_1]
