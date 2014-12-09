@@ -1,6 +1,8 @@
 """Miscellaneous useful utility functions."""
 
+import os, os.path
 import math
+import platform
 from datetime import time, datetime, date, timedelta
 
 SECS_PER_HOUR = 60 * 60
@@ -107,4 +109,27 @@ def get_time_periods_from_strings(tperiod_strings):
         time_periods.append((tp_a, tp_b))
     return time_periods
 
+def my_abspath_win(in_path):
+    if ':' in in_path:
+        out_path = in_path
+    else:
+        cwd = os.getcwd()
+        if in_path.startswith('.' + os.sep):
+            out_path = cwd + os.sep + (os.sep).join(in_path.split(os.sep)[1:])
+        else:
+            out_path = cwd + os.sep + in_path
+    # Double backslashes also cause problems.
+    while os.sep + os.sep in out_path:
+        out_path = out_path.replace(os.sep + os.sep, os.sep)
+    return out_path
+
+def get_win_safe_path(in_path):
+    """See http://stackoverflow.com/questions/14075465/copy-a-file-with-a-too-long-path-to-another-directory-in-python"""
+    if platform.system() == 'Windows':
+        # System's os.path.abspath() func ALSO fails with long path names.
+        abs_path = my_abspath_win(in_path)
+        safe_path = "\\\\?\\" + abs_path
+    else:
+        safe_path = in_path
+    return safe_path
 

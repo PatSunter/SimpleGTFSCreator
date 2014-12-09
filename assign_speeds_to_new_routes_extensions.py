@@ -102,17 +102,23 @@ def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
         # and long names. If only one specified, need looser search.
         old_route_print_name = misc_utils.routeNameFileReady(
             old_r_s_name, old_r_l_name)
-        match_exp = None
+        match_exps = []
         if old_r_s_name and old_r_l_name:
-            match_exp = "%s%s%s-speeds-*-all.csv" \
-                % (speeds_dir_in, os.sep, old_route_print_name)
+            match_exps.append("%s%s%s-speeds-*-all.csv" \
+                % (speeds_dir_in, os.sep, old_route_print_name))
         elif old_r_s_name:
-            match_exp = "%s%s%s*-speeds-*-all.csv" \
-                % (speeds_dir_in, os.sep, old_route_print_name)
+            match_exps.append("%s%s%s-speeds-*-all.csv" \
+                % (speeds_dir_in, os.sep, old_route_print_name))
+            match_exps.append("%s%s%s-*-speeds-*-all.csv" \
+                % (speeds_dir_in, os.sep, old_route_print_name))
         elif old_r_l_name:            
-            match_exp = "%s%s*%s-speeds-*-all.csv" \
-                % (speeds_dir_in, os.sep, old_route_print_name)
-        route_speeds_fnames = glob.glob(match_exp)
+            match_exps.append("%s%s%s-speeds-*-all.csv" \
+                % (speeds_dir_in, os.sep, old_route_print_name))
+            match_exps.append("%s%s*-%s-speeds-*-all.csv" \
+                % (speeds_dir_in, os.sep, old_route_print_name))
+        route_speeds_fnames = []
+        for match_exp in match_exps:    
+            route_speeds_fnames += glob.glob(match_exp)
         assert len(route_speeds_fnames) >= 1
 
         # Now process all the existing speeds files for this route (or
@@ -234,15 +240,10 @@ def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
             route_speeds_fnames = glob.glob(
                 "%s%s%s-speeds-*-all.csv" % (speeds_dir_in, os.sep, \
                     route_print_name))
-            # For why the prefix in copy, its a problem with Windows path
-            # lengths :- http://stackoverflow.com/questions/14075465/copy-a-file-with-a-too-long-path-to-another-directory-in-python
+            copy_path_out = misc_utils.get_win_safe_path(speeds_dir_out)
             for speeds_fname in route_speeds_fnames:
-                # Found by experiment had to do abspath twice.
-                # Weird, maybe because of the double-slash.
-                abs_path_in = os.path.abspath(os.path.abspath(speeds_fname))
-                abs_path_out = os.path.abspath(speeds_dir_out)
-                shutil.copy("\\\\?\\" + abs_path_in,
-                    "\\\\?\\" + abs_path_out)
+                copy_path_in = misc_utils.get_win_safe_path(speeds_fname)
+                shutil.copy(copy_path_in, copy_path_out)
     print "...done."
     return
 

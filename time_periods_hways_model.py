@@ -27,10 +27,11 @@ def get_route_hways_for_dir_period_fname(r_short_name, r_long_name,
 def write_headways_minutes(stop_gtfs_ids_to_names_map, period_headways,
         periods, csv_fname, stop_id_order=None):
 
+    safe_path_fname = misc_utils.get_win_safe_path(csv_fname)
     if sys.version_info >= (3,0,0):
-        csv_file = open(csv_fname, 'w', newline='')
+        csv_file = open(safe_path_fname, 'w', newline='')
     else:
-        csv_file = open(csv_fname, 'wb')
+        csv_file = open(safe_path_fname, 'wb')
 
     writer = csv.writer(csv_file, delimiter=';')
 
@@ -56,10 +57,11 @@ def write_route_hways_all_routes_all_stops(r_ids_to_names_map,
     print "Writing all route average headways in TPs to file %s ..." \
         % output_fname
     
+    safe_path_fname = misc_utils.get_win_safe_path(output_fname)
     if sys.version_info >= (3,0,0):
-        csv_file = open(output_fname, 'w', newline='')
+        csv_file = open(safe_path_fname, 'w', newline='')
     else:
-        csv_file = open(output_fname, 'wb')
+        csv_file = open(safe_path_fname, 'wb')
     writer = csv.writer(csv_file, delimiter=';')
     period_names = misc_utils.get_time_period_name_strings(time_periods)
     route_ids_sorted = sorted(avg_hways_all_stops.keys(), key=lambda x:int(x))
@@ -83,7 +85,8 @@ def write_route_hways_all_routes_all_stops(r_ids_to_names_map,
     return
 
 def read_route_hways_all_routes_all_stops(per_route_hways_fname):
-    csv_in_file = open(per_route_hways_fname, 'r')
+    safe_path_fname = misc_utils.get_win_safe_path(per_route_hways_fname)
+    csv_in_file = open(safe_path_fname, 'r')
     reader = csv.reader(csv_in_file, delimiter=';')
 
     avg_hways_all_stops = {}

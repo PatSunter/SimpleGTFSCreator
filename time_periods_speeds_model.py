@@ -19,10 +19,12 @@ AVG_SPEED_HEADERS = ['Stop_a_id','Stop_a_name','Stop_b_id','Stop_b_name',\
 
 def write_avg_speeds_on_segments(stop_gtfs_ids_to_names_map, period_avg_speeds,
         seg_distances, periods, csv_fname, round_places):
+    # Use absolute path to deal with Windows issues with long paths.
+    safe_path_fname = misc_utils.get_win_safe_path(csv_fname)
     if sys.version_info >= (3,0,0):
-        csv_file = open(csv_fname, 'w', newline='')
+        csv_file = open(safe_path_fname, 'w', newline='')
     else:
-        csv_file = open(csv_fname, 'wb')
+        csv_file = open(safe_path_fname, 'wb')
     writer = csv.writer(csv_file, delimiter=';')
 
     period_names = misc_utils.get_time_period_name_strings(periods)
@@ -61,7 +63,8 @@ def read_route_speed_info_by_time_periods(read_dir, r_short_name, r_long_name,
     return time_periods, r_avg_speeds_on_segs, seg_distances        
 
 def read_avg_speeds_on_segments(csv_fname, sort_seg_stop_id_pairs=False):
-    csv_file = open(csv_fname, 'r')
+    safe_fpath = misc_utils.get_win_safe_path(csv_fname)
+    csv_file = open(safe_fpath, 'r')
     reader = csv.reader(csv_file, delimiter=';')
 
     headers = reader.next()
