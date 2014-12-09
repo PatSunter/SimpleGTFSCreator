@@ -10,7 +10,8 @@ import csv
 import glob
 from optparse import OptionParser
 
-import gtfs_ops
+import misc_utils
+import time_periods_speeds_model as tps_speeds_model
 
 def main():
     parser = OptionParser()
@@ -55,20 +56,22 @@ def main():
     for ii, csv_speeds_in_fname in enumerate(glob.glob("%s%s*speeds*.csv" \
             % (input_dir_speeds, os.sep))):
         #print "Reading speeds in file %s" % csv_speeds_in_fname
-        csv_in_file = open(csv_speeds_in_fname, 'r')
+        safe_path_in = misc_utils.get_win_safe_path(csv_speeds_in_fname)
+        csv_in_file = open(safe_path_in, 'r')
         reader = csv.reader(csv_in_file, delimiter=';')
         csv_speeds_out_fname = os.path.join(output_dir_speeds,
             os.path.basename(csv_speeds_in_fname))
+        safe_path_out = misc_utils.get_win_safe_path(csv_speeds_out_fname)
         if sys.version_info >= (3,0,0):
-            csv_out_file = open(csv_speeds_out_fname, 'w', newline='')
+            csv_out_file = open(safe_path_out, 'w', newline='')
         else:
-            csv_out_file = open(csv_speeds_out_fname, 'wb')
+            csv_out_file = open(safe_path_out, 'wb')
         writer = csv.writer(csv_out_file, delimiter=';')
 
         headers = reader.next()
         writer.writerow(headers)
         for row in reader:
-            n_base_cols = len(gtfs_ops.AVG_SPEED_HEADERS) 
+            n_base_cols = len(tps_speeds_model.AVG_SPEED_HEADERS) 
             init_col_vals = row[:n_base_cols]
             speeds_in_tps = map(float, row[n_base_cols:])
             speeds_in_tps_out = []
