@@ -432,13 +432,13 @@ def get_set_of_stops_in_route_so_far(segs_so_far):
     stop_ids_in_route_so_far = set(stop_ids_in_route_so_far)    
     return stop_ids_in_route_so_far
 
-def get_link_with_shortest_dist(link_seg_ids, all_pattern_segs,
+def get_seg_id_with_shortest_dist(link_seg_ids, seg_refs,
         link_dest_stop_ids_disallowed):
     # Trying algorithm of choosing segment with shortest distance.
     min_direct_dist = float("inf")
     min_dist_seg_id = None
     for link_seg_id in link_seg_ids:
-        link_seg = get_seg_ref_with_id(link_seg_id, all_pattern_segs)
+        link_seg = get_seg_ref_with_id(link_seg_id, seg_refs)
         if link_seg.first_id in link_dest_stop_ids_disallowed \
                 or link_seg.second_id in link_dest_stop_ids_disallowed:
             continue
@@ -447,11 +447,11 @@ def get_link_with_shortest_dist(link_seg_ids, all_pattern_segs,
             min_dist_seg_id = link_seg_id
     return min_dist_seg_id
 
-def get_links_sorted_by_distance(link_seg_ids, all_pattern_segs,
+def get_links_sorted_by_distance(link_seg_ids, seg_refs,
         link_dest_stop_ids_disallowed):
     links_and_dists = []
     for link_seg_id in link_seg_ids:
-        link_seg = get_seg_ref_with_id(link_seg_id, all_pattern_segs)
+        link_seg = get_seg_ref_with_id(link_seg_id, seg_refs)
         if link_seg.first_id in link_dest_stop_ids_disallowed \
                 or link_seg.second_id in link_dest_stop_ids_disallowed:
             continue
@@ -464,12 +464,24 @@ def get_links_sorted_by_distance(link_seg_ids, all_pattern_segs,
         link_seg_ids_sorted_by_dist = None
     return link_seg_ids_sorted_by_dist
 
-def get_seg_ids_that_include_stop_id(all_pattern_segs, force_first_stop_id):
-    seg_ids_that_include_stop = []
-    for seg in all_pattern_segs:
-        if force_first_stop_id in (seg.first_id, seg.second_id):
-            seg_ids_that_include_stop.append(seg.seg_id)
-    return seg_ids_that_include_stop 
+def get_seg_id_with_stop_ids(seg_refs, stop_id_a, stop_id_b):
+    seg_ids_that_include_stop_ids = []
+    for seg in seg_refs:
+        if stop_id_a in (seg.first_id, seg.second_id) \
+                and stop_id_b in (seg.first_id, seg.second_id):
+            seg_ids_that_include_stop_ids.append(seg.seg_id)
+    assert len(seg_ids_that_include_stop_ids) <= 1        
+    if not seg_ids_that_include_stop_ids:
+        return None
+    else:
+        return seg_ids_that_include_stop_ids[0]
+
+def get_seg_ids_that_include_stop_id(seg_refs, stop_id):
+    seg_ids_that_include_stop_id = []
+    for seg_ref in seg_refs:
+        if stop_id in (seg_ref.first_id, seg_ref.second_id):
+            seg_ids_that_include_stop_id.append(seg_ref.seg_id)
+    return seg_ids_that_include_stop_id 
 
 def get_seg_ids_with_minimum_links(seg_ids, seg_links):
     min_link_segs = []
@@ -479,8 +491,25 @@ def get_seg_ids_with_minimum_links(seg_ids, seg_links):
             min_link_segs.append(seg_id)
     return min_link_segs, min_links
 
+def get_seg_refs_for_ordered_stop_ids(stop_ids, seg_refs):
+    ordered_segs = []
+    for stop_id_a, stop_id_b in misc_utils.pairs(stop_ids):
+        seg_id = get_seg_id_with_stop_ids(seg_refs,
+            stop_id_a, stop_id_b)
+        if seg_id is None:
+            print "WARNING:- the pattern being processed contains no "\
+                "segments with stop pair IDs %d, %d, in list of "\
+                "ordered stop ids you requested."\
+                % (stop_id_a, stop_id_b)
+            ordered_segs = []
+            break
+        else:
+            seg_ref = get_seg_ref_with_id(seg_id, seg_refs)
+            ordered_segs.append(seg_ref)    
+    return ordered_segs
+
 def get_full_stop_pattern_segs(all_pattern_segs, seg_links,
-        force_first_stop_id=None):
+        force_first_stop_ids=None):
     """More advanced function to build a list of segments into a route :-
     this time by finding a 'full-stop' pattern linking all the segments.
 
@@ -492,14 +521,14 @@ def get_full_stop_pattern_segs(all_pattern_segs, seg_links,
     well. It will follow the branch with the most segments, won't include
     other branches.)
 
-    Note re alg tuning and force_first_stop_id argument:- after a fair bit
+    Note re alg tuning and force_first_stop_ids argument:- after a fair bit
     of effort I was able to make the algorithm produce sensible results for
     the 'full stop' version of routes with expresses and a 'city loop' trains
     in most cases. However a few cases such as the Belgrave line in Melbourne
     are difficult to come up with a good outcome with no initial information.
 
-    Therefore there is a force_first_stop_id argument that allows to force
-    beginning the segment-chain building algorithm at a particular stop, to
+    Therefore there is a force_first_stop_ids argument that allows to force
+    beginning the segment-chain building algorithm at a particular stop(s), to
     help get a good result.
     """
 
@@ -510,25 +539,105 @@ def get_full_stop_pattern_segs(all_pattern_segs, seg_links,
         full_stop_pattern_segs = list(all_pattern_segs)
         return full_stop_pattern_segs
 
-    if force_first_stop_id is None:
-        # Ok: start with a search for one of the segments that 
+    if force_first_stop_ids and len(force_first_stop_ids) >= 3:
+        # In this case :- we have at least two segments to start from in a
+        # given order. Build these then add the longest chain at end.
+        # We know there's no need to extend/reverse from here.
+        print "Starting building chain with segs between stops %s ...." \
+            % (force_first_stop_ids)
+        full_stop_pattern_segs = get_seg_refs_for_ordered_stop_ids(
+            force_first_stop_ids, all_pattern_segs)
+        if not full_stop_pattern_segs: return []
+        first_link_seg_id = full_stop_pattern_segs.pop().seg_id
+        print "Added seg IDs b/w these stops: %s - next is %d" \
+            % (map(operator.attrgetter('seg_id'), full_stop_pattern_segs),\
+               first_link_seg_id)
+        seg_chain, chain_len = get_longest_seg_linked_chain(first_link_seg_id,
+            all_pattern_segs, full_stop_pattern_segs, seg_links, {})
+        full_stop_pattern_segs += seg_chain
+        return full_stop_pattern_segs
+    elif force_first_stop_ids and len(force_first_stop_ids) == 2:
+        # We've been given req'd first two stops, hence req'd first 
+        # segment. So search all options with this segment in order.
+        print "Starting building chain with seg between stops %s ...." \
+            % (force_first_stop_ids)
+        full_stop_pattern_segs = get_seg_refs_for_ordered_stop_ids(
+            force_first_stop_ids, all_pattern_segs)
+        if not full_stop_pattern_segs: return []
+        first_seg_id = full_stop_pattern_segs[0].seg_id
+        print "First build seg is #%d" % first_seg_id
+        link_seg_ids = seg_links[first_seg_id]
+        link_segs = [get_seg_ref_with_id(seg_id, all_pattern_segs) for \
+            seg_id in link_seg_ids]
+        cand_init_link_seg_ids = get_seg_ids_that_include_stop_id(
+            link_segs, force_first_stop_ids[-1])
+        # Now we need to find the longest sub-chain for all of these 
+        # init link candidates.
+        longest_chain = []
+        for init_link_seg_id in cand_init_link_seg_ids:
+            seg_chain, chain_len = get_longest_seg_linked_chain(
+                init_link_seg_id, all_pattern_segs, full_stop_pattern_segs,
+                seg_links, {})
+            if chain_len > len(longest_chain):
+                longest_chain = seg_chain
+        full_stop_pattern_segs += longest_chain         
+    elif force_first_stop_ids and len(force_first_stop_ids) == 1:
+        # We have a first stop ID - but don't necessarily know which segment
+        # this stop belongs to to start at. Need to potentially try
+        # all combos passing through this stop.
+        first_stop_id = force_first_stop_ids[0]
+        print "Forcing start of building chain at stop ID %d" \
+            % first_stop_id
+        cand_start_seg_ids = get_seg_ids_that_include_stop_id(
+            all_pattern_segs, first_stop_id)
+        start_seg_ids_and_chains = []
+        for start_seg_id in cand_start_seg_ids:
+            start_seg_ref = get_seg_ref_with_id(start_seg_id, all_pattern_segs)
+            other_stop_id = get_other_stop_id(start_seg_ref, first_stop_id)
+            link_seg_ids = seg_links[start_seg_id]
+            link_segs = [get_seg_ref_with_id(seg_id, all_pattern_segs) for \
+                seg_id in link_seg_ids]
+            # We only want 'forward' links away from the first stop id
+            # work out longest of these.
+            cand_init_link_seg_ids = get_seg_ids_that_include_stop_id(
+                link_segs, other_stop_id)
+            longest_sub_chain = []
+            for link_seg_id in cand_init_link_seg_ids:
+                seg_chain, chain_len = get_longest_seg_linked_chain(
+                    link_seg_id, all_pattern_segs, [start_seg_ref],
+                    seg_links, {})
+                if chain_len > len(longest_sub_chain):
+                    longest_sub_chain = seg_chain
+            start_seg_ids_and_chains.append([start_seg_ref] + longest_sub_chain)
+
+        # We need to get the longest chain
+        start_seg_ids_and_chains.sort(key = len)
+        full_stop_pattern_segs = start_seg_ids_and_chains[0]
+    else:
+        # We don't have a forced seg to start at.
+        # Ok: best bet in this case is search for one of the segments that 
         # only has one link - and is therefore an end of the route.
+        possible_reverse_links = False
         start_seg_id = None
-        multiple_start_links = False
         for seg_id, link_seg_ids in seg_links.iteritems():
             if len(link_seg_ids) == 1:
                 start_seg_id = seg_id
                 break
-        if start_seg_id is None:
-            print "This route has no segments with only one link."
-            multiple_start_links = True
+        if start_seg_id is not None:
+            print "No start stop specified, so starting with seg #%d "\
+                "that has only one link." % start_seg_id
+        else:
+            print "No start stop specified, and route has no "\
+                "segments with only one link."
+            possible_reverse_links = True
             # Fallback case.
-            candidate_start_seg_ids, min_links = get_seg_ids_with_minimum_links(
+            cand_start_seg_ids, min_links = get_seg_ids_with_minimum_links(
                 all_seg_ids, seg_links)
             print "Minimum links of any seg is %d" % min_links
-            # Try the starts and ends first.
+            # Try the 'starts' and 'ends' first in order we read segs for this
+            # route.
             min_dist_from_end = float("inf")
-            for seg_id in candidate_start_seg_ids:
+            for seg_id in cand_start_seg_ids:
                 dist_from_end = min(seg_id - 1, len(all_pattern_segs) - seg_id)
                 if dist_from_end < min_dist_from_end:
                     min_dist_from_end = dist_from_end
@@ -537,93 +646,76 @@ def get_full_stop_pattern_segs(all_pattern_segs, seg_links,
                         break
             print "Starting with seg to have this # of links closest to "\
                 "start or end = seg #%s" % start_seg_id
-    else:
-        # Force a start at a segment that includes the given stop.
-        # This stop may still be included in several segments, so use the 
-        # segment with the least links and shortest.
-        print "Forcing start of building chain at stop ID %d" \
-            % force_first_stop_id
-        candidate_segs = get_seg_ids_that_include_stop_id(all_pattern_segs,
-            force_first_stop_id)
-        revised_cand_segs, min_links = get_seg_ids_with_minimum_links(
-            candidate_segs, seg_links)
-        if min_links > 1:
-            multiple_start_links = True
-        start_seg_id = get_link_with_shortest_dist(revised_cand_segs,
-            all_pattern_segs, [])
-        print "Starting with seg %d, which has %d links, and is the "\
-            "shortest seg with this many links." \
-            % (start_seg_id, min_links)
-
-    #print "Added start seg %d." % start_seg_id
-    start_seg_ref = get_seg_ref_with_id(start_seg_id, all_pattern_segs)
-    full_stop_pattern_segs.append(start_seg_ref)
-
-    if multiple_start_links:
+                    
+        # Ok:- we've chosen a start seg ID, now need to choose best link seg
+        #print "Added start seg %d." % start_seg_id
+        start_seg_ref = get_seg_ref_with_id(start_seg_id, all_pattern_segs)
+        full_stop_pattern_segs.append(start_seg_ref)
         init_link_seg_ids = seg_links[start_seg_id]
-        first_link_seg_id = get_link_with_shortest_dist(init_link_seg_ids,
+        first_link_seg_id = get_seg_id_with_shortest_dist(init_link_seg_ids,
             all_pattern_segs, [])
-    else:
-        init_link_seg_ids = seg_links[start_seg_id]
-        first_link_seg_id = init_link_seg_ids[0]
 
-    seg_chain, chain_len = get_longest_seg_linked_chain(first_link_seg_id,
-        all_pattern_segs, full_stop_pattern_segs, seg_links, {})
-    full_stop_pattern_segs += seg_chain
+        seg_chain, chain_len = get_longest_seg_linked_chain(first_link_seg_id,
+            all_pattern_segs, full_stop_pattern_segs, seg_links, {})
+        full_stop_pattern_segs += seg_chain
 
-    if multiple_start_links and len(full_stop_pattern_segs) > 1:
-        # Special case for if we started in the middle of a line
-        rem_init_link_seg_ids = list(init_link_seg_ids)
-        rem_init_link_seg_ids.remove(first_link_seg_id)
-        first_stop_id = find_non_linking_stop_id(full_stop_pattern_segs[0],
-            full_stop_pattern_segs[1])
-        stop_ids_in_route_so_far = get_set_of_stops_in_route_so_far(
-            full_stop_pattern_segs) 
-        rev_candidate_link_ids = []
-        for link_seg_id in rem_init_link_seg_ids:
-            link_seg_ref = get_seg_ref_with_id(link_seg_id, all_pattern_segs)
-            # There are legitimate cases where this link might not be from
-            #  the first stop.
-            if first_stop_id not in \
-                    (link_seg_ref.first_id, link_seg_ref.second_id):
-                continue
-            non_link_stop = get_other_stop_id(link_seg_ref, first_stop_id)
-            if non_link_stop not in stop_ids_in_route_so_far:
-                # we have an unexplored section, not an express.
-                rev_candidate_link_ids.append(link_seg_id)
-        if rev_candidate_link_ids:
-            print "Calling special reverse case ..."
-            full_stop_pattern_segs.reverse()
-            longest_chains_lookup_cache = {}
-            longest_sub_chain = []
-            longest_sub_chain_len = 0
-            for rev_link_seg_id in rev_candidate_link_ids:
-                seg_sub_chain, sub_chain_len = get_longest_seg_linked_chain(
-                    rev_link_seg_id, all_pattern_segs,
-                    full_stop_pattern_segs, seg_links,
-                    #longest_chains_lookup_cache)
-                    {})
-                if sub_chain_len > longest_sub_chain_len:
-                    longest_sub_chain = seg_sub_chain
-                    longest_sub_chain_len = sub_chain_len
-            full_stop_pattern_segs += longest_sub_chain
+        if possible_reverse_links:
+            # We want to try building other possible 'reverse' chains, given
+            # with this flag we may have started in the middle of a route.
+            rem_init_link_seg_ids = list(init_link_seg_ids)
+            rem_init_link_seg_ids.remove(first_link_seg_id)
+            first_stop_id = find_non_linking_stop_id(full_stop_pattern_segs[0],
+                full_stop_pattern_segs[1])
+            stop_ids_in_route_so_far = get_set_of_stops_in_route_so_far(
+                full_stop_pattern_segs) 
+            rev_candidate_link_ids = []
+            for link_seg_id in rem_init_link_seg_ids:
+                link_seg_ref = get_seg_ref_with_id(link_seg_id, all_pattern_segs)
+                if first_stop_id not in \
+                        (link_seg_ref.first_id, link_seg_ref.second_id):
+                    # This must be a 'branch' from the first stop, not a
+                    # possible reverse.
+                    continue
+                non_link_stop = get_other_stop_id(link_seg_ref, first_stop_id)
+                # NOTE:- rules out some loops
+                if non_link_stop not in stop_ids_in_route_so_far:
+                    # we have an unexplored section, not an express into 
+                    # already included chain.
+                    rev_candidate_link_ids.append(link_seg_id)
+            if rev_candidate_link_ids:
+                print "Calling special reverse case ..."
+                full_stop_pattern_segs.reverse()
+                longest_chains_lookup_cache = {}
+                longest_sub_chain = []
+                longest_sub_chain_len = 0
+                for rev_link_seg_id in rev_candidate_link_ids:
+                    seg_sub_chain, sub_chain_len = get_longest_seg_linked_chain(
+                        rev_link_seg_id, all_pattern_segs,
+                        full_stop_pattern_segs, seg_links,
+                        #longest_chains_lookup_cache)
+                        {})
+                    if sub_chain_len > longest_sub_chain_len:
+                        longest_sub_chain = seg_sub_chain
+                        longest_sub_chain_len = sub_chain_len
+                full_stop_pattern_segs += longest_sub_chain
 
     return full_stop_pattern_segs 
 
 def get_longest_seg_linked_chain(init_seg_id, all_segs, segs_visited_so_far,
         seg_links, longest_chains_lookup_cache):
 
-    seg_chain = []
-    prev_seg_ref = segs_visited_so_far[-1]
-    prev_seg_id = prev_seg_ref.seg_id
-    init_seg_ref = get_seg_ref_with_id(init_seg_id, all_segs)
-    prev_stop_id = find_linking_stop_id(prev_seg_ref, init_seg_ref)
-    stop_ids_in_route_so_far = get_set_of_stops_in_route_so_far(
-        segs_visited_so_far)
-
     # Special case for having visited all segments - esp for 1-segment routes
     if len(all_segs) == len(segs_visited_so_far):
         return [], 0
+
+    seg_chain = []
+
+    init_seg_ref = get_seg_ref_with_id(init_seg_id, all_segs)
+    prev_seg_ref = segs_visited_so_far[-1]
+    prev_seg_id = prev_seg_ref.seg_id
+    prev_stop_id = find_linking_stop_id(prev_seg_ref, init_seg_ref)
+    stop_ids_in_route_so_far = get_set_of_stops_in_route_so_far(
+        segs_visited_so_far)
 
     curr_seg_id = init_seg_id
     while True:

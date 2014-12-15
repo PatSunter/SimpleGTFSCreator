@@ -43,7 +43,7 @@ def add_all_stops_from_gtfs(schedule, stops_lyr, stops_multipoint,
     return gtfs_stop_id_to_stop_id_map
 
 def calc_seg_refs_for_route(schedule, gtfs_route_id, r_id,
-        gtfs_stop_id_to_stop_id_map, seg_distances, route_first_stop_id = None):
+        gtfs_stop_id_to_stop_id_map, seg_distances, route_first_stop_ids = None):
     """Calculate all the segments for a full-stop version of the route with
     specified GTFS ID."""
     route_seg_refs = []
@@ -95,7 +95,7 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id, r_id,
 
     seg_links = route_segs.build_seg_links(all_pattern_segments)
     full_stop_pattern_segs = route_segs.get_full_stop_pattern_segs(
-        all_pattern_segments, seg_links, route_first_stop_id)
+        all_pattern_segments, seg_links, route_first_stop_ids)
 
     stop_id_to_gtfs_stop_id_map = {}        
     for gtfs_stop_id, stop_id in gtfs_stop_id_to_stop_id_map.iteritems():
@@ -161,21 +161,13 @@ def get_gtfs_route_ids_in_output_order(routes_dict):
         temp_route_defs)
     return gtfs_route_id_output_order
 
-def get_route_defs_and_segments_from_gtfs(schedule, segments_lyr,
-        stops_lyr, gtfs_stop_id_to_stop_id_map, mode_config,
-        line_start_stop_info = None):
-    """Get all the route segments from an existing GTFS file, to a GIS
-    segments layer. Return the list of route_defs describing the routes."""
-    route_defs = []
-    seg_distances = {}
-    route_segments_initial = {}
-    all_route_dirs = {}
-    
-    force_start_stop_ids_by_gtfs_route_id = None
+def convert_to_route_stop_ids(line_start_stop_info, schedule,
+        gtfs_stop_id_to_stop_id_map):
+    force_first_stop_ids_by_gtfs_route_id = None
     if line_start_stop_info:
-        force_start_stop_ids_by_gtfs_route_id = {}
+        force_first_stop_ids_by_gtfs_route_id = {}
         r_name_type = line_start_stop_info[1]
-        for rname, stop_name in line_start_stop_info[0].iteritems():
+        for rname, stop_names in line_start_stop_info[0].iteritems():
             if r_name_type == 'route_long_name':
                 r_id, r_info = gtfs_ops.getRouteByLongName(schedule, rname)
             elif r_name_type == 'route_short_name':
@@ -189,15 +181,33 @@ def get_route_defs_and_segments_from_gtfs(schedule, segments_lyr,
                     "info, '%s', of type '%s', not found in schedule. "\
                     "Skipping." % (rname, r_name_type)
                 continue
-            gtfs_stop_id, s_info = gtfs_ops.getStopWithName(schedule,
-                stop_name)
-            if gtfs_stop_id is None:
-                print "Warning:- stop name specified in line start stop "\
-                    "info, '%s', for route '%s', not found in schedule. "\
-                    "Skipping." % (stop_name, rname)
-                continue
-            first_stop_id = gtfs_stop_id_to_stop_id_map[gtfs_stop_id]
-            force_start_stop_ids_by_gtfs_route_id[r_id] = first_stop_id
+            first_stop_ids = []
+            for stop_name in stop_names:
+                assert stop_name
+                gtfs_stop_id, s_info = gtfs_ops.getStopWithName(schedule,
+                    stop_name)
+                if gtfs_stop_id is None:
+                    print "Warning:- stop name specified in line start stop "\
+                        "info, '%s', for route '%s', not found in schedule. "\
+                        "Skipping." % (stop_name, rname)
+                    continue
+                first_stop_ids.append(gtfs_stop_id_to_stop_id_map[gtfs_stop_id])
+            force_first_stop_ids_by_gtfs_route_id[r_id] = first_stop_ids
+    return force_first_stop_ids_by_gtfs_route_id
+
+def get_route_defs_and_segments_from_gtfs(schedule, segments_lyr,
+        stops_lyr, gtfs_stop_id_to_stop_id_map, mode_config,
+        line_start_stop_info = None):
+    """Get all the route segments from an existing GTFS file, to a GIS
+    segments layer. Return the list of route_defs describing the routes."""
+    route_defs = []
+    seg_distances = {}
+    route_segments_initial = {}
+    all_route_dirs = {}
+
+    force_first_stop_ids_by_gtfs_route_id = \
+        convert_to_route_stop_ids(line_start_stop_info, schedule,
+            gtfs_stop_id_to_stop_id_map)
 
     # Work out a nice processing order.
     gtfs_route_ids_output_order = get_gtfs_route_ids_in_output_order(
@@ -212,16 +222,16 @@ def get_route_defs_and_segments_from_gtfs(schedule, segments_lyr,
     for gtfs_route_id in gtfs_route_ids_output_order:
         r_id = gtfs_route_ids_to_route_ids_map[gtfs_route_id]
         gtfs_route = schedule.routes[gtfs_route_id]
-        force_first_stop_id = None
-        if force_start_stop_ids_by_gtfs_route_id:
+        force_first_stop_ids = None
+        if force_first_stop_ids_by_gtfs_route_id:
             try:
-                force_first_stop_id = \
-                    force_start_stop_ids_by_gtfs_route_id[gtfs_route_id]
+                force_first_stop_ids = \
+                    force_first_stop_ids_by_gtfs_route_id[gtfs_route_id]
             except KeyError:
-                force_first_stop_id = None
+                force_first_stop_ids = None
         route_seg_refs, route_dirs = calc_seg_refs_for_route(schedule, 
             gtfs_route_id, r_id, gtfs_stop_id_to_stop_id_map, seg_distances,
-            force_first_stop_id)
+            force_first_stop_ids)
         route_segments_initial[gtfs_route_id] = route_seg_refs
         all_route_dirs[gtfs_route_id] = route_dirs
 
@@ -265,9 +275,15 @@ def parse_line_start_stops_csv_file(line_start_stop_info_csv_fname):
              gtfs_ops.ALLOWED_ROUTE_NAME_TYPES)
         sys.exit(1)     
     for ii, row in enumerate(reader):
-        rname = row[0]
-        stop_name = row[1]
-        line_start_stop_dict[rname] = stop_name
+        try:
+            rname = row[0]
+        except IndexError:
+            continue
+        stop_names = row[1:]
+        stop_names = [sn for sn in stop_names if sn]
+        if not stop_names:
+            continue
+        line_start_stop_dict[rname] = stop_names
     csv_file.close()
     line_start_stop_info = None
     if len(line_start_stop_dict) >= 1:
