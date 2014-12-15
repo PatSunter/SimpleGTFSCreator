@@ -599,7 +599,7 @@ def get_full_stop_pattern_segs(all_pattern_segs, seg_links,
             longest_sub_chain_len = 0
             for rev_link_seg_id in rev_candidate_link_ids:
                 seg_sub_chain, sub_chain_len = get_longest_seg_linked_chain(
-                    link_seg_id, all_pattern_segs,
+                    rev_link_seg_id, all_pattern_segs,
                     full_stop_pattern_segs, seg_links,
                     #longest_chains_lookup_cache)
                     {})
