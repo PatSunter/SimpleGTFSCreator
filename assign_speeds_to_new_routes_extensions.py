@@ -139,15 +139,6 @@ def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
                     name_a = fname_sections[-6]
                 except IndexError:
                     name_a = None
-            print "\t  creating file for dir/period '%s', '%s':"\
-                % (trips_dir_file_ready, serv_period)
-            time_periods, route_avg_speeds_in, seg_distances_in, null = \
-                tps_speeds_model.read_route_speed_info_by_time_periods(
-                    speeds_dir_in, name_a, name_b,
-                    serv_period, trips_dir_file_ready,
-                    sort_seg_stop_id_pairs=False)
-            # We need to calc connecting stop order here, as looking it up 
-            #  from speeds file depends on direction of travel.
             # First step is to work out the direction mapping from speeds
             #  file to new route def, given we replaced one of the dirs.
             if trips_dir_file_ready == \
@@ -155,6 +146,19 @@ def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
                 working_dir_name = other_dir_name
             else:
                 working_dir_name = upd_dir_name    
+            print "\t  creating file for new dir/period '%s', '%s' "\
+                % (working_dir_name, serv_period)
+            if misc_utils.routeDirStringToFileReady(working_dir_name) \
+                    != trips_dir_file_ready:    
+                print "\t   (from old dir file '%s'):"\
+                    % (trips_dir_file_ready)
+            time_periods, route_avg_speeds_in, seg_distances_in, null = \
+                tps_speeds_model.read_route_speed_info_by_time_periods(
+                    speeds_dir_in, name_a, name_b,
+                    serv_period, trips_dir_file_ready,
+                    sort_seg_stop_id_pairs=False)
+            # We need to calc connecting stop order here, as looking it up 
+            #  from speeds file depends on direction of travel.
             dir_index = ext_route.dir_names.index(working_dir_name)
             # Now order the stops in direction of travel and get GTFS IDs
             # Handle the case where the last orig segment doesn't have speed 
