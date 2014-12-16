@@ -100,7 +100,7 @@ def calc_seg_refs_for_route(schedule, gtfs_route_id, r_id,
     stop_id_to_gtfs_stop_id_map = {}        
     for gtfs_stop_id, stop_id in gtfs_stop_id_to_stop_id_map.iteritems():
         stop_id_to_gtfs_stop_id_map[stop_id] = gtfs_stop_id
-    # Now calculate direction names, based on first and last stops.
+    # Now calculate direction names
     if len(full_stop_pattern_segs) == 1:
         first_stop_id = full_stop_pattern_segs[0].first_id
         last_stop_id = full_stop_pattern_segs[0].second_id
