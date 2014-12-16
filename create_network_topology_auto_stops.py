@@ -35,20 +35,24 @@ class TransferNetworkDef:
         self.skip_on_mway = skip_on_mway
 
 def add_route_start_end_stops(stops_lyr, input_routes_lyr,
-        stops_multipoint, mode_config):
-    routes_srs = input_routes_lyr.GetSpatialRef()
+        route_geom_transform, stops_multipoint, mode_config):
     print "Adding route start and end stops...."
+    comp_srs = osr.SpatialReference()
+    comp_srs.ImportFromEPSG(route_geom_ops.COMPARISON_EPSG)
     for ri, route in enumerate(input_routes_lyr):
         route_geom = route.GetGeometryRef()
+        route_geom_clone = route_geom.Clone()
+        route_geom_clone.Transform(route_geom_transform)
         #print "For route '%s':" % route.GetField(0)
         start_pt = ogr.Geometry(ogr.wkbPoint)
-        start_pt.AddPoint(*route_geom.GetPoint(0))
+        start_pt.AddPoint(*route_geom_clone.GetPoint(0))
+        pt_count = route_geom_clone.GetPointCount()
         end_pt = ogr.Geometry(ogr.wkbPoint)
-        end_pt.AddPoint(*route_geom.GetPoint(route_geom.GetPointCount()-1))
+        end_pt.AddPoint(*route_geom_clone.GetPoint(pt_count-1))
         start_end_pts = [start_pt, end_pt]
-        for ii, pt in enumerate(start_end_pts):
-            dist_existing = route_geom_ops.get_min_dist_from_existing_stops(pt,
-                stops_multipoint)
+        for ii, pt_geom in enumerate(start_end_pts):
+            dist_existing = route_geom_ops.get_min_dist_from_existing_stops(
+                pt_geom, stops_multipoint)
             #print "(Calc dist from existing for start/end pt %d as %.1f)" %\
             #    (ii, dist_existing)
             if dist_existing < route_geom_ops.SAME_POINT:
@@ -57,9 +61,11 @@ def add_route_start_end_stops(stops_lyr, input_routes_lyr,
                 pass
             else:
                 stop_id = tp_model.add_stop(stops_lyr, stops_multipoint,
-                    tp_model.STOP_TYPE_ROUTE_START_END, pt, routes_srs,
+                    tp_model.STOP_TYPE_ROUTE_START_END, pt_geom, comp_srs,
                     mode_config)
                 #print "...Adding stop at route start/end"
+            pt_geom.Destroy()
+        route_geom_clone.Destroy()    
     input_routes_lyr.ResetReading()
     print "...done adding start and end stops."
     return
@@ -563,20 +569,25 @@ def add_filler_stops(stops_lyr, input_routes_lyr, mways_route_isects,
     """Note: if motorways_lyr is None, it will be ignored. Otherwise it will
     be used to check and ignore adding filler stops on motorways."""    
     print "\nAdding Filler stops at max dist %.1fm:" % filler_dist
-    routes_srs = input_routes_lyr.GetSpatialRef()
-    
+    comp_srs = osr.SpatialReference()
+    comp_srs.ImportFromEPSG(route_geom_ops.COMPARISON_EPSG)
+
     mways_this_route_isect = None
     for ii, route in enumerate(input_routes_lyr):
         rname = route.GetField(0)
         #if rname != "R2": continue
         route_geom = route.GetGeometryRef()
-        route_length_total = route_geom.Length()
+        # We need to do this transform since the filler calculation involves
+        # distances in meters.
+        route_geom_clone = route_geom.Clone()
+        route_geom_clone.Transform(route_geom_transform)
+        route_length_total = route_geom_clone.Length()
         print "Adding Filler stops for route %s (%.1fm length)" % \
             (rname, route_length_total)
         if mways_route_isects:
             mways_this_route_isect = mways_route_isects[ii]
         # First, get the stops of interest along route, we need to 'walk'
-        route_buffer = route_geom.Buffer(
+        route_buffer = route_geom_clone.Buffer(
             route_geom_ops.STOP_ON_ROUTE_CHECK_DIST)
         stops_near_route = stops_multipoint.Intersection(route_buffer)
         # In cases of just one point, this will return a Point, rather than
@@ -589,9 +600,9 @@ def add_filler_stops(stops_lyr, input_routes_lyr, mways_route_isects,
             stops_near_route = near_route_multipoint
         rem_stop_is = range(stops_near_route.GetGeometryCount())
         # Now walk the route, adding fillers when needed
-        start_coord = route_geom.GetPoint(0)
+        start_coord = route_geom_clone.GetPoint(0)
         current_loc = start_coord
-        end_coord = route_geom.GetPoint(route_geom.GetPointCount()-1)
+        end_coord = route_geom_clone.GetPoint(route_geom_clone.GetPointCount()-1)
         end_vertex = ogr.Geometry(ogr.wkbPoint)
         end_vertex.AddPoint(*end_coord)
 
@@ -606,7 +617,7 @@ def add_filler_stops(stops_lyr, input_routes_lyr, mways_route_isects,
         last_vertex_i = 0
         while line_remains is True:
             next_stop_on_route_isect, stop_ii, dist_to_next, n_last_vertex_i =\
-                route_geom_ops.get_next_stop_and_dist(route_geom, current_loc,
+                route_geom_ops.get_next_stop_and_dist(route_geom_clone, current_loc,
                     stops_near_route, rem_stop_is, last_vertex_i)
             if next_stop_on_route_isect is not None:
                 rem_stop_is.remove(stop_ii)
@@ -623,7 +634,7 @@ def add_filler_stops(stops_lyr, input_routes_lyr, mways_route_isects,
                 filler_l_v_i = last_vertex_i
                 for ii in range(1, filler_incs+1):
                     current_loc, filler_l_v_i = \
-                        route_geom_ops.move_dist_along_route(route_geom,
+                        route_geom_ops.move_dist_along_route(route_geom_clone,
                             current_loc, walk_dist_to_filler, filler_l_v_i)
                     filler_geom = ogr.Geometry(ogr.wkbPoint)
                     filler_geom.AddPoint(*current_loc)
@@ -639,8 +650,9 @@ def add_filler_stops(stops_lyr, input_routes_lyr, mways_route_isects,
                     #    (current_loc[0], current_loc[1])
                     stop_id = tp_model.add_stop(stops_lyr, stops_multipoint,
                         filler_stop_type, filler_geom,
-                        routes_srs, mode_config)
+                        comp_srs, mode_config)
                     filler_stops_added += 1    
+                    filler_geom.Destroy()
             # Walk ahead.
             current_loc = next_stop_on_route_isect
             last_vertex_i = n_last_vertex_i
@@ -661,6 +673,7 @@ def add_filler_stops(stops_lyr, input_routes_lyr, mways_route_isects,
         route_buffer.Destroy()
         stops_near_route.Destroy()
         end_vertex.Destroy()
+        route_geom_clone.Destroy()
         print "..added %d filler stops between the %d existing stops "\
             "detected for this route." % (filler_stops_added, stops_found)
         if mways_route_isects:
@@ -714,14 +727,13 @@ def create_stops(input_routes_lyr, motorways_lyr, stops_shp_file_name,
     # Actually populating this is handled in tp_model addStop().
     stops_multipoint = ogr.Geometry(ogr.wkbMultiPoint)
 
+    routes_srs = input_routes_lyr.GetSpatialRef()
+    target_srs = osr.SpatialReference()
+    target_srs.ImportFromEPSG(route_geom_ops.COMPARISON_EPSG)
+    route_geom_transform = osr.CoordinateTransformation(routes_srs, target_srs)
     mways_buffer_geom = None
     mways_route_isects = None
-    route_geom_transform = None
     if motorways_lyr:
-        routes_srs = input_routes_lyr.GetSpatialRef()
-        target_srs = osr.SpatialReference()
-        target_srs.ImportFromEPSG(route_geom_ops.COMPARISON_EPSG)
-        route_geom_transform = osr.CoordinateTransformation(routes_srs, target_srs)
         mways_buffer_geom = motorway_calcs.create_motorways_buffer(
             motorways_lyr, target_srs)
         print "Creating mway buffer isects for routes ...."
@@ -742,14 +754,16 @@ def create_stops(input_routes_lyr, motorways_lyr, stops_shp_file_name,
         input_routes_lyr.ResetReading()
         print ".... done."
 
-    add_route_start_end_stops(stops_lyr, input_routes_lyr,
+    add_route_start_end_stops(stops_lyr, 
+        input_routes_lyr, route_geom_transform,
         stops_multipoint, mode_config)
     add_self_transfer_stops(stops_lyr, input_routes_lyr,
         mways_route_isects, route_geom_transform,
         stops_multipoint, mode_config)
-    add_other_network_transfer_stops(stops_lyr, input_routes_lyr,
-        mways_route_isects, route_geom_transform,
-        transfer_networks_def, stops_multipoint, mode_config)
+    if transfer_networks_def:
+        add_other_network_transfer_stops(stops_lyr, input_routes_lyr,
+            mways_route_isects, route_geom_transform,
+            transfer_networks_def, stops_multipoint, mode_config)
     add_filler_stops(stops_lyr, input_routes_lyr, mways_route_isects,
         route_geom_transform, filler_dist, tp_model.STOP_TYPE_FILLERS,
         stops_multipoint, mode_config)
@@ -782,6 +796,7 @@ def main():
 
     parser.set_defaults(filler_dist=str(DEFAULT_FILLER_DIST))
     parser.set_defaults(skip_stops_on_mways="true")
+    parser.set_defaults(inputtransfers="")
     (options, args) = parser.parse_args()
 
     if not options.inputroutes:
@@ -790,9 +805,6 @@ def main():
     if not options.outputstops:
         parser.print_help()
         parser.error("No stops shapefile path given.")
-    if not options.inputtransfers:
-        parser.print_help()
-        parser.error("No transfers CSV file path given.")
     if not options.service:
         parser.print_help()
         parser.error("No service option requested. Should be one of %s" \
@@ -847,16 +859,19 @@ def main():
     #  existence, just read names.
     stops_fname = os.path.expanduser(options.outputstops)
 
-    tfer_network_csv_fname = os.path.expanduser(options.inputtransfers)
-    tfer_networks_def = read_transfer_network_info(tfer_network_csv_fname)
-    print "Transfer network defs read from file %s were:" % \
-        (tfer_network_csv_fname)
-    for tfer_nw_def in tfer_networks_def:
-        print "File '%s': range %d, min dist %d, output type '%s', "\
-            "skip_mways: %s" % \
-            (tfer_nw_def.shp_fname, tfer_nw_def.tfer_range, \
-             tfer_nw_def.stop_min_dist, tfer_nw_def.stop_typ_name,\
-             tfer_nw_def.skip_on_mway)
+    if options.inputtransfers:
+        tfer_network_csv_fname = os.path.expanduser(options.inputtransfers)
+        tfer_networks_def = read_transfer_network_info(tfer_network_csv_fname)
+        print "Transfer network defs read from file %s were:" % \
+            (tfer_network_csv_fname)
+        for tfer_nw_def in tfer_networks_def:
+            print "File '%s': range %d, min dist %d, output type '%s', "\
+                "skip_mways: %s" % \
+                (tfer_nw_def.shp_fname, tfer_nw_def.tfer_range, \
+                 tfer_nw_def.stop_min_dist, tfer_nw_def.stop_typ_name,\
+                 tfer_nw_def.skip_on_mway)
+    else:
+        tfer_networks_def = None
 
     create_stops(input_routes_lyr, mways_lyr, stops_fname,
         tfer_networks_def, filler_dist, mode_config)
