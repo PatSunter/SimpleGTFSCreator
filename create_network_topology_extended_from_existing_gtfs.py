@@ -31,6 +31,24 @@ def get_connecting_stop_indices(stop_list_a, stop_list_b):
         conn_index_a, conn_index_b = 0, 0
     return conn_index_a, conn_index_b
 
+def get_connecting_stop_index_using_geom(stop_list, connecting_stop_id,
+        all_stops_lookup_dict, stops_comp_transform):
+    conn_index = None
+    connecting_stop_feat = all_stops_lookup_dict[connecting_stop_id]
+    connecting_geom = connecting_stop_feat.GetGeometryRef().Clone()
+    connecting_geom.Transform(stops_comp_transform)
+    for stop_index in [0, -1]:
+        stop_feat = all_stops_lookup_dict[stop_list[stop_index]]
+        stop_geom = stop_feat.GetGeometryRef().Clone()
+        stop_geom.Transform(stops_comp_transform)
+        dist_conn_stop = connecting_geom.Distance(stop_geom)
+        stop_geom.Destroy()    
+        if dist_conn_stop < route_geom_ops.STOP_ON_ROUTE_CHECK_DIST:
+            conn_index = stop_index
+            break
+    connecting_geom.Destroy()
+    return conn_index
+
 def get_connecting_stop_indices_using_geom(stop_list_a, stop_list_b,
         all_stops_lookup_dict, stops_comp_transform):
     conn_index_a, conn_index_b = None, None
@@ -65,6 +83,20 @@ def get_connecting_stop_indices_using_geom(stop_list_a, stop_list_b,
         conn_index_a, conn_index_b = 0, 0
 
     return conn_index_a, conn_index_b
+
+def replace_extension_conn_stop(ext_seg_refs, conn_index_exten, replace_stop_id):
+    # Need to replace the first linking stop in extension with the linking
+    # stop of orig route.
+    c_i_ext = conn_index_exten
+    stop_ids_along_segs = route_segs.extract_stop_list_along_route(
+        ext_seg_refs)
+    if ext_seg_refs[c_i_ext].first_id == stop_ids_along_segs[c_i_ext]:
+        ext_seg_refs[c_i_ext].first_id = replace_stop_id
+    elif ext_seg_refs[c_i_ext].second_id == stop_ids_along_segs[c_i_ext]:
+        ext_seg_refs[c_i_ext].second_id = replace_stop_id
+    else:
+        assert 0
+    return
 
 def create_extended_route_def(r_def_to_extend, r_ext_info,
         exist_segs_lookup_table, ext_seg_refs,
@@ -128,16 +160,9 @@ def create_extended_route_def(r_def_to_extend, r_ext_info,
     # We can do this at the end, since we haven't previously updated the 
     #  underlying ext seg refs.
     if replace_conn_extension_stop:
-        conn_stop_orig_route_id = stop_ids_along_route[conn_index_exist]
-        # Need to replace the first linking stop in extension with the linking
-        # stop of orig route.
-        c_i_ext = conn_index_exten
-        if ext_seg_refs[c_i_ext].first_id == stop_ids_of_extension[c_i_ext]:
-            ext_seg_refs[c_i_ext].first_id = conn_stop_orig_route_id
-        elif ext_seg_refs[c_i_ext].second_id == stop_ids_of_extension[c_i_ext]:
-            ext_seg_refs[c_i_ext].second_id = conn_stop_orig_route_id
-        else:
-            assert 0
+        orig_route_conn_stop_id = stop_ids_along_route[conn_index_exist]
+        replace_extension_conn_stop(ext_seg_refs, conn_index_exten,
+            orig_route_conn_stop_id)
 
     if r_ext_info.upd_r_short_name:
         r_short_name = r_ext_info.upd_r_short_name
@@ -173,9 +198,6 @@ def create_new_route_def_extend_existing(r_def_to_extend, r_ext_info,
     stop_ids_of_extension = route_segs.extract_stop_list_along_route(
         ext_seg_refs)
 
-    assert connecting_stop_id in (stop_ids_of_extension[0], \
-        stop_ids_of_extension[-1])
-
     first_index = stop_ids_along_route.index(orig_route_first_stop_id)
     connecting_index = stop_ids_along_route.index(connecting_stop_id)
 
@@ -188,14 +210,40 @@ def create_new_route_def_extend_existing(r_def_to_extend, r_ext_info,
             init_seg_ref_ids[connecting_index:first_index]))
         dir_name_to_keep = r_def_to_extend.dir_names[0]
 
+    replace_conn_extension_stop = False
     if connecting_stop_id == stop_ids_of_extension[0]:
+        conn_index_ext = 0
+    elif connecting_stop_id == stop_ids_of_extension[-1]:
+        conn_index_ext = -1
+    else:
+        # Its possible the extension segments were generated off another
+        # nearby stop. Check this.
+        conn_index_ext = get_connecting_stop_index_using_geom(
+            stop_ids_of_extension, connecting_stop_id, all_stops_lookup_dict,
+            stops_comp_transform)
+        if conn_index_ext == None:
+            print "ERROR:- when creating a new route defn for "\
+                "new route '%s', based on route %s :- couldn't "\
+                "match up stops of normal route, with extension."\
+                % (r_ext_info.ext_name, \
+                   misc_utils.get_route_print_name(r_def_to_extend.short_name,
+                    r_def_to_extend.long_name))
+            sys.exit(1)
+        else:
+            replace_conn_extension_stop = True
+
+    if conn_index_ext == 0:
         combined_seg_ref_ids = init_seg_ref_ids_to_use + \
             ext_seg_ref_ids
-    elif connecting_stop_id == stop_ids_of_extension[-1]:
+    elif conn_index_ext == -1:
         combined_seg_ref_ids = init_seg_ref_ids_to_use + \
             list(reversed(ext_seg_ref_ids))
     else:
         assert 0
+    
+    if replace_conn_extension_stop:
+        replace_extension_conn_stop(ext_seg_refs, conn_index_exten,
+            connecting_stop_id)
 
     if r_ext_info.upd_r_short_name:
         r_short_name = r_ext_info.upd_r_short_name
