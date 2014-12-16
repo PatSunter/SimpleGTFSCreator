@@ -9,6 +9,7 @@ from optparse import OptionParser
 import osgeo.ogr
 from osgeo import ogr, osr
 
+import misc_utils
 import topology_shapefile_data_model as tp_model
 import route_segs
 import route_geom_ops
@@ -18,8 +19,56 @@ import create_network_topology_segments as create_segs
 
 DELETE_EXISTING = True
 
+def get_connecting_stop_indices(stop_list_a, stop_list_b):
+    conn_index_a, conn_index_b = None, None
+    if stop_list_a[-1] == stop_list_b[0]:
+        conn_index_a, conn_index_b = -1, 0
+    if stop_list_a[-1] == stop_list_b[-1]:
+        conn_index_a, conn_index_b = -1, -1
+    if stop_list_a[0] == stop_list_b[-1]:
+        conn_index_a, conn_index_b = 0, -1
+    if stop_list_a[0] == stop_list_b[0]:
+        conn_index_a, conn_index_b = 0, 0
+    return conn_index_a, conn_index_b
+
+def get_connecting_stop_indices_using_geom(stop_list_a, stop_list_b,
+        all_stops_lookup_dict, stops_comp_transform):
+    conn_index_a, conn_index_b = None, None
+    stops_a_first = all_stops_lookup_dict[stop_list_a[0]]
+    stops_a_last = all_stops_lookup_dict[stop_list_a[-1]]
+    stops_b_first = all_stops_lookup_dict[stop_list_b[0]]
+    stops_b_last = all_stops_lookup_dict[stop_list_b[-1]]
+
+    stops_a_first_geom = stops_a_first.GetGeometryRef().Clone()
+    stops_a_last_geom = stops_a_last.GetGeometryRef().Clone()
+    stops_b_first_geom = stops_b_first.GetGeometryRef().Clone()
+    stops_b_last_geom = stops_b_last.GetGeometryRef().Clone()
+    stops_a_first_geom.Transform(stops_comp_transform)
+    stops_a_last_geom.Transform(stops_comp_transform)
+    stops_b_first_geom.Transform(stops_comp_transform)
+    stops_b_last_geom.Transform(stops_comp_transform)
+    dist_a_first_b_first = stops_a_first_geom.Distance(stops_b_first_geom)
+    dist_a_first_b_last = stops_a_first_geom.Distance(stops_b_last_geom)
+    dist_a_last_b_first = stops_a_last_geom.Distance(stops_b_first_geom)
+    dist_a_last_b_last = stops_a_last_geom.Distance(stops_b_last_geom)
+    stops_a_first_geom.Destroy()
+    stops_a_last_geom.Destroy()
+    stops_b_first_geom.Destroy()
+    stops_b_last_geom.Destroy()
+    if dist_a_last_b_first < route_geom_ops.STOP_ON_ROUTE_CHECK_DIST:
+        conn_index_a, conn_index_b = -1, 0
+    if dist_a_last_b_last < route_geom_ops.STOP_ON_ROUTE_CHECK_DIST:
+        conn_index_a, conn_index_b = -1, -1
+    if dist_a_first_b_last < route_geom_ops.STOP_ON_ROUTE_CHECK_DIST:
+        conn_index_a, conn_index_b = 0, -1
+    if dist_a_first_b_first < route_geom_ops.STOP_ON_ROUTE_CHECK_DIST:
+        conn_index_a, conn_index_b = 0, 0
+
+    return conn_index_a, conn_index_b
+
 def create_extended_route_def(r_def_to_extend, r_ext_info,
-        exist_segs_lookup_table, ext_seg_refs):
+        exist_segs_lookup_table, ext_seg_refs,
+        all_stops_lookup_dict, stops_comp_transform):
     init_seg_ref_ids = r_def_to_extend.ordered_seg_ids
     ext_seg_ref_ids = map(operator.attrgetter('seg_id'), ext_seg_refs)
     # Ok:- we need to ensure connecting stop is at one of the ends,
@@ -31,22 +80,42 @@ def create_extended_route_def(r_def_to_extend, r_ext_info,
     stop_ids_of_extension = route_segs.extract_stop_list_along_route(
         ext_seg_refs)
 
-    if stop_ids_along_route[-1] == stop_ids_of_extension[0]:
+    replace_conn_extension_stop = False
+    conn_index_exist, conn_index_exten = get_connecting_stop_indices(
+        stop_ids_along_route, stop_ids_of_extension)
+
+    if None in (conn_index_exist, conn_index_exten):
+        # Try again, this time based on distances.
+        conn_index_exist, conn_index_exten = \
+            get_connecting_stop_indices_using_geom(
+                stop_ids_along_route, stop_ids_of_extension,
+                all_stops_lookup_dict, stops_comp_transform)
+        replace_conn_extension_stop = True        
+
+    if None in (conn_index_exist, conn_index_exten):
+        print "ERROR:- when creating an extended route defn for "\
+            "route ext '%s', of route %s :- couldn't "\
+            "match up stops of normal route, with extension."\
+            % (r_ext_info.ext_name, \
+               misc_utils.get_route_print_name(r_def_to_extend.short_name,
+                r_def_to_extend.long_name))
+
+    if (conn_index_exist, conn_index_exten) == (-1, 0):
         combined_seg_ref_ids = init_seg_ref_ids + ext_seg_ref_ids
         updated_dir_names = \
             (r_ext_info.upd_dir_name, r_def_to_extend.dir_names[1])
-    elif stop_ids_along_route[-1] == stop_ids_of_extension[-1]:
+    elif (conn_index_exist, conn_index_exten) == (-1, -1):
         combined_seg_ref_ids = init_seg_ref_ids + \
             list(reversed(ext_seg_ref_ids))
         updated_dir_names = \
             (r_ext_info.upd_dir_name, r_def_to_extend.dir_names[1])
-    elif stop_ids_along_route[0] == stop_ids_of_extension[-1]:
+    elif (conn_index_exist, conn_index_exten) == (0, -1):
         # Trickier:- need to insert the extensions at the start, thus
         # preserving direction of original section
         combined_seg_ref_ids = ext_seg_ref_ids + init_seg_ref_ids
         updated_dir_names = \
             (r_def_to_extend.dir_names[0], r_ext_info.upd_dir_name)
-    elif stop_ids_along_route[0] == stop_ids_of_extension[0]:
+    elif (conn_index_exist, conn_index_exten) == (0, 0):
         # Insert at front, also reversed.
         combined_seg_ref_ids = list(reversed(ext_seg_ref_ids)) \
             + init_seg_ref_ids
@@ -55,6 +124,20 @@ def create_extended_route_def(r_def_to_extend, r_ext_info,
     else:
         # Shouldn't reach this case for an extended route.
         assert 0
+
+    # We can do this at the end, since we haven't previously updated the 
+    #  underlying ext seg refs.
+    if replace_conn_extension_stop:
+        conn_stop_orig_route_id = stop_ids_along_route[conn_index_exist]
+        # Need to replace the first linking stop in extension with the linking
+        # stop of orig route.
+        c_i_ext = conn_index_exten
+        if ext_seg_refs[c_i_ext].first_id == stop_ids_of_extension[c_i_ext]:
+            ext_seg_refs[c_i_ext].first_id = conn_stop_orig_route_id
+        elif ext_seg_refs[c_i_ext].second_id == stop_ids_of_extension[c_i_ext]:
+            ext_seg_refs[c_i_ext].second_id = conn_stop_orig_route_id
+        else:
+            assert 0
 
     if r_ext_info.upd_r_short_name:
         r_short_name = r_ext_info.upd_r_short_name
@@ -76,7 +159,8 @@ def create_extended_route_def(r_def_to_extend, r_ext_info,
 
 def create_new_route_def_extend_existing(r_def_to_extend, r_ext_info,
         new_r_id, connecting_stop_id, orig_route_first_stop_id,
-        segs_lookup_table, ext_seg_refs):
+        segs_lookup_table, ext_seg_refs,
+        all_stops_lookup_dict, stops_comp_transform):
 
     init_seg_ref_ids = r_def_to_extend.ordered_seg_ids
     ext_seg_ref_ids = map(operator.attrgetter('seg_id'), ext_seg_refs)
@@ -155,6 +239,8 @@ def create_extended_topology( existing_route_defs, existing_segs_lyr,
     target_srs = osr.SpatialReference()
     target_srs.ImportFromEPSG(route_geom_ops.COMPARISON_EPSG)
     route_transform = osr.CoordinateTransformation(route_exts_srs, target_srs)
+    stops_srs = all_stops_lyr.GetSpatialRef()
+    stops_transform = osr.CoordinateTransformation(stops_srs, target_srs)
 
     # This list is going to be extended with the new seg refs.
     combined_seg_refs = existing_seg_refs[:]
@@ -200,14 +286,14 @@ def create_extended_topology( existing_route_defs, existing_segs_lyr,
         # nearby stops
         route_ext_geom = route_ext_feat.GetGeometryRef()
         route_ext_geom.Transform(route_transform)
-        stops_near_route, stops_near_route_map = \
+        stops_near_route_ext, stops_near_route_ext_map = \
             route_geom_ops.get_stops_near_route(route_ext_geom,
                 stops_multipoint)
-        if stops_near_route.GetGeometryCount() == 0:
+        if stops_near_route_ext.GetGeometryCount() == 0:
             print "Error, no stops detected near route ext %s while creating "\
                 "segments." % r_ext_info.ext_name
             sys.exit(1)
-        if stops_near_route.GetGeometryCount() == 1:
+        if stops_near_route_ext.GetGeometryCount() == 1:
             print "Error, only one stop detected near route ext %s while "\
                 "creating segments." % r_ext_info.ext_name
             sys.exit(1)
@@ -215,7 +301,8 @@ def create_extended_topology( existing_route_defs, existing_segs_lyr,
         new_ext_seg_refs, new_seg_refs_cnt = \
             create_segs.create_segments_along_route(
                 r_ext_info.ext_name, r_id, route_ext_geom, 
-                all_stops_lyr, stops_near_route, stops_near_route_map,
+                all_stops_lyr, stops_near_route_ext,
+                stops_near_route_ext_map,
                 combined_seg_refs, warn_not_start_end=False)
 
         if len(new_ext_seg_refs) == 0:
@@ -224,14 +311,20 @@ def create_extended_topology( existing_route_defs, existing_segs_lyr,
                 % r_ext_info.ext_name
             sys.exit(1)
 
+        all_stops_lookup_dict = tp_model.build_stops_lookup_table(
+            all_stops_lyr)
+
         if r_ext_info.ext_type == tp_model.ROUTE_EXT_TYPE_NEW:
             new_r_def = create_new_route_def_extend_existing(
                 r_def_to_extend, r_ext_info,
                 r_id, connecting_stop_id, orig_route_first_stop_id,
-                existing_segs_lookup_table, new_ext_seg_refs)
+                existing_segs_lookup_table, new_ext_seg_refs,
+                all_stops_lookup_dict, stops_transform)
         elif r_ext_info.ext_type == tp_model.ROUTE_EXT_TYPE_EXTENSION:
-            new_r_def = create_extended_route_def(r_def_to_extend, r_ext_info, 
-                existing_segs_lookup_table, new_ext_seg_refs)
+            new_r_def = create_extended_route_def(
+                r_def_to_extend, r_ext_info, 
+                existing_segs_lookup_table, new_ext_seg_refs,
+                all_stops_lookup_dict, stops_transform)
         else:
             assert 0
         
