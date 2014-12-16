@@ -94,7 +94,8 @@ def create_new_avg_headway_entries(
             for dir_period_pair in dir_period_pairs_needed:
                 avg_hways_all_stops_out[ext_gtfs_r_id][dir_period_pair] = \
                     def_hways_in_tps_out
-
+        del(r_ids_to_names_map[old_gtfs_r_id])
+        del(avg_hways_all_stops_out[old_gtfs_r_id])
     tps_hways_model.write_route_hways_all_routes_all_stops(r_ids_to_names_map,
         tps, avg_hways_all_stops_out, output_hways_fname,
         round_places=HEADWAY_ROUND_PLACES)
