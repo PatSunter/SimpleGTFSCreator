@@ -359,7 +359,7 @@ def main():
             parser.print_help()
             parser.error("Per-route headways file given '%s' doesn't exist." \
                 % per_route_hways)
-        per_route_hways, hways_tps = \
+        per_route_hways, hways_tps, r_ids_to_names_map = \
             tps_hways_model.read_route_hways_all_routes_all_stops(
                 per_route_hways_fname)
     else:
