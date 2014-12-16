@@ -693,7 +693,14 @@ def read_transfer_network_info(transfer_network_csv_fname):
     transfer_networks_def = []
     for ii, row in enumerate(reader):
         nw_def_entry = row
-        tf_nw_def = TransferNetworkDef(nw_def_entry[0], int(nw_def_entry[1]),
+        stops_shp_path = nw_def_entry[0]
+        if not os.path.isabs(stops_shp_path):
+            csv_file_dir = os.path.dirname(transfer_network_csv_fname)
+            stops_shp_path = os.path.join(csv_file_dir, stops_shp_path)
+            stops_shp_path = os.path.abspath(stops_shp_path)
+        tf_nw_def = TransferNetworkDef(
+            stops_shp_path, 
+            int(nw_def_entry[1]),
             int(nw_def_entry[2]), nw_def_entry[3],
             parser_utils.str2bool(nw_def_entry[4]))
         transfer_networks_def.append(tf_nw_def) 
@@ -777,16 +784,16 @@ def main():
     parser.set_defaults(skip_stops_on_mways="true")
     (options, args) = parser.parse_args()
 
-    if options.inputroutes is None:
+    if not options.inputroutes:
         parser.print_help()
         parser.error("No routes shapefile path given.")
-    if options.outputstops is None:
+    if not options.outputstops:
         parser.print_help()
         parser.error("No stops shapefile path given.")
-    if options.inputtransfers is None:
+    if not options.inputtransfers:
         parser.print_help()
         parser.error("No transfers CSV file path given.")
-    if options.service is None:
+    if not options.service:
         parser.print_help()
         parser.error("No service option requested. Should be one of %s" \
             % (allowedServs))
