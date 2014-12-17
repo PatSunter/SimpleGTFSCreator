@@ -6,7 +6,7 @@ Laurent's script of bus-peak speed in Melbourne."""
 import numpy
 import matplotlib.pyplot as plt
 
-from assign_speeds_to_network_topology import peak_speed_func
+from speed_funcs_location_based import peak_speed_func
 from speed_funcs_vehicle_based import *
 
 def plot_melb_bus_dist_based():
@@ -26,6 +26,11 @@ def plot_melb_bus_dist_based():
     plt.xlabel("Distance from Melb CBD (km)")
     plt.ylabel("Average speed (km/h)")
     plt.savefig('speed-distance-bus-peak-Melb')
+
+# These values are set based on examples from HiTrans book:
+# Nielsen, G., Nelson, J., Mulley, C., Tegner, G., Lind, G., & Lange, T. 2005,
+# Public transport - Planning the networks. HiTrans Best practice guide No. 2., ,  . 
+# p126-127.
 
 speed_func_params = {
     'slow_bus': {

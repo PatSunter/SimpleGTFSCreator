@@ -14,6 +14,7 @@ import mode_timetable_info as m_t_info
 import motorway_calcs
 import route_geom_ops
 import seg_speed_models
+import speed_funcs_location_based
 
 def constant_speed_max(route_segment, mode_config):    
     """Just return constant average speed defined for this mode."""
@@ -62,23 +63,6 @@ def buses_peak_with_mway_check(route_segment, mode_config):
         speed = calc_peak_speed_melb_bus(route_segment, mode_config_bus)
     return speed
 
-# Lat, long of Melbourne's origin in EPSG:4326 (WGS 84 on WGS 84 datum)
-# Cnr of Bourke & Swanston
-#ORIGIN_LAT_LON = (-37.81348, 144.96558) 
-# As provided by Laurent in function - works out at N-E corner of CBD grid
-#ORIGIN_LAT_LON = (-37.809176, 144.970653)
-# As calculated by converting allnodes.csv[0] from EPSG:28355 to EPSG:4326
-ORIGIN_LAT_LON = (-37.81081208860423, 144.969328103266179)
-
-def peak_speed_func(Z_km):
-    """Formula used as provided by Laurent Allieres, 7 Nov 2013.
-    Modified by Pat S, 2014/10/17, to cut off dist from city centre at max
-    50km - otherwise strange values result."""
-    Z_km = min(Z_km, 50)
-    peak_speed = (230 + 15 * Z_km - 0.13 * Z_km**2) * 60/1000.0 * (2/3.0) \
-        + 5.0/(Z_km/50.0+1)
-    return peak_speed
-
 def calc_peak_speed_melb_bus(route_segment, mode_config):
     assert mode_config['system'] == 'Bus'
 
@@ -100,7 +84,8 @@ def calc_peak_speed_melb_bus(route_segment, mode_config):
     seg_midpoint.Transform(transform_seg)
 
     origin = ogr.Geometry(ogr.wkbPoint)
-    origin.AddPoint(ORIGIN_LAT_LON[1], ORIGIN_LAT_LON[0]) # Func takes lon,lat
+    origin_coords = speed_funcs_location_based.MELB_ORIGIN_LAT_LON
+    origin.AddPoint(origin_coords[1], origin_coords[0]) # Func takes lon,lat
     origin_srs = osr.SpatialReference()
     origin_srs.ImportFromEPSG(4326)
     transform_origin = osr.CoordinateTransformation(origin_srs, target_srs)
@@ -108,7 +93,7 @@ def calc_peak_speed_melb_bus(route_segment, mode_config):
     
     Z = origin.Distance(seg_midpoint)
     Z_km = Z / 1000.0
-    V = peak_speed_func(Z_km)
+    V = speed_funcs_location_based.peak_speed_func(Z_km)
     return V
 
 SPEED_FUNC_SETS_REGISTER = {
