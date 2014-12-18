@@ -56,6 +56,11 @@ class Seq_Stop_Info:
         """Calculates travel time between two stops. Current algorithm is 
         based on an average speed on that segment, and physical distance
         between them."""
+        if self.dist_km_to_next < (1 / 1000.0):
+            # Defensive case for weird very short segments, which sometimes
+            #  happens in GTFS files.
+            return timedelta(seconds=1.0)
+
         seg_speed = speed_model.get_speed_on_next_segment(self.extra_speed_info,
             curr_time, peak_status)
         assert seg_speed > 0

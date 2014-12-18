@@ -10,8 +10,6 @@ def calc_vehicle_trav_time_bw_stops(stop_dist_m,
         max_spd_m_s, accel_m_s2):
     dist_rest_to_max = dist_trav_rest_to_max_speed(
        max_spd_m_s, accel_m_s2)
-    #import pdb
-    #pdb.set_trace()
     if (dist_rest_to_max * 2) >= stop_dist_m:
         # We never actually reach full speed :-
         # halve the distance and work out trav time under full

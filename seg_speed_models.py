@@ -12,6 +12,8 @@ from osgeo import ogr, osr
 import route_segs
 import topology_shapefile_data_model as tp_model
 import time_periods_speeds_model as tps_speeds_model
+import speed_funcs_location_based
+import speed_funcs_vehicle_based
 
 class SpeedModel:
     """A Class that handles the speed of segments, at different times :-
@@ -69,6 +71,7 @@ class ConstantSpeedPerModeModel(SpeedModel):
 
 SEG_FREE_SPEED_FIELD = "free_speed" # real, 24, 15
 SEG_PEAK_SPEED_FIELD = "peak_speed" # real, 24, 15
+
 
 class PeakOffPeakSegSpeedInfo:
     """A small struct to store needed extra per-stop speed info read in
@@ -202,7 +205,7 @@ def find_valid_speed_nearest_to_period(tp_speeds, tp_i):
     while tp_try_i < len(tp_speeds):
         tp_i_to_read = tp_i + tp_i_shift
         if tp_i_to_read < len(tp_speeds) and tp_i_to_read >= 0:
-            tp_try_i += 1    
+            tp_try_i += 1
             seg_speed = tp_speeds[tp_i_to_read]
             if seg_speed > 0:
                 break
@@ -461,3 +464,114 @@ class MultipleTimePeriodsPerRouteSpeedModel(MultipleTimePeriodsSpeedModel):
                     break
 
         return tp_speeds, tps
+
+##################################################
+
+def constant_speed_max(route_segment, mode_config):    
+    """Just return constant average speed defined for this mode."""
+    return mode_config['avespeed']
+
+def constant_speed_max_peak(route_segment, mode_config):
+    """Just return constant average speed defined for this mode, peak hours"""
+    return mode_config['avespeed-peak']
+
+PEAK_RATIO = 0.5
+def ratio_max_speed(route_segment, mode_config):    
+    return mode_config['avespeed'] * PEAK_RATIO
+
+def check_mways_status_exists(route_segments_lyr, mode_config):
+    motorway_calcs.ensure_motorway_field_exists(route_segments_lyr)
+    return
+
+def constant_speed_offpeak_mway_check(route_segment, mode_config):    
+    """First check if segment is on a motorway. Then assign relevant speed."""
+    if 'on_motorway' in mode_config:
+        mode_config_bus = mode_config
+        mode_config_bus_mway = mode_config['on_motorway']
+    else:
+        mode_config_bus_mway = mode_config
+        mode_config_bus = mode_config['on_street']
+
+    if motorway_calcs.is_on_motorway(route_segment):
+        speed = constant_speed_max(route_segment, mode_config_bus_mway)
+    else:
+        speed = constant_speed_max(route_segment, mode_config_bus)
+    return speed    
+
+def buses_peak_with_mway_check(route_segment, mode_config):
+    """First check if segment is on a motorway. Then assign relevant speed."""
+    if 'on_motorway' in mode_config:
+        mode_config_bus = mode_config
+        mode_config_bus_mway = mode_config['on_motorway']
+    else:
+        mode_config_bus_mway = mode_config
+        mode_config_bus = mode_config['on_street']
+
+    if motorway_calcs.is_on_motorway(route_segment):
+        speed = constant_speed_max_peak(route_segment, mode_config_bus_mway)
+    else:
+        # Apply congestion if on street network
+        speed = calc_peak_speed_melb_bus(route_segment, mode_config_bus)
+    return speed
+
+def calc_peak_speed_melb_bus(route_segment, mode_config):
+    assert mode_config['system'] == 'Bus'
+
+    target_srs = osr.SpatialReference()
+    target_srs.ImportFromEPSG(route_geom_ops.COMPARISON_EPSG)
+
+    seg_geom = route_segment.GetGeometryRef()
+    segment_srs = seg_geom.GetSpatialReference()
+    # Get the midpoint, as we'll consider this the point to use as 'distance'
+    # from CBD
+    if seg_geom.GetPoint(0) == seg_geom.GetPoint(1):
+        # A special case for segments of zero length. Shouldn't really exist,
+        # but have been produced in some cases.
+        seg_midpoint = ogr.Geometry(ogr.wkbPoint)
+        seg_midpoint.AddPoint(*seg_geom.GetPoint(0))
+    else:
+        seg_midpoint = seg_geom.Centroid()
+    transform_seg = osr.CoordinateTransformation(segment_srs, target_srs)
+    seg_midpoint.Transform(transform_seg)
+
+    origin = ogr.Geometry(ogr.wkbPoint)
+    origin_coords = speed_funcs_location_based.MELB_ORIGIN_LAT_LON
+    origin.AddPoint(origin_coords[1], origin_coords[0]) # Func takes lon,lat
+    origin_srs = osr.SpatialReference()
+    origin_srs.ImportFromEPSG(4326)
+    transform_origin = osr.CoordinateTransformation(origin_srs, target_srs)
+    origin.Transform(transform_origin)
+    
+    Z = origin.Distance(seg_midpoint)
+    Z_km = Z / 1000.0
+    V = speed_funcs_location_based.peak_speed_func(Z_km)
+    return V
+
+def calc_speed_based_on_segment_length(route_segment, time_period, mode_config):
+    # Ignore time period for now.
+    seg_dist_m = route_segment.GetField(tp_model.SEG_ROUTE_DIST_FIELD)
+    max_spd_km_h = mode_config['maxspeed']
+    accel_m_s2 = mode_config['accel']
+    stop_dwell_time_s = mode_config['stop_dwell_time']
+    spd = speed_funcs_vehicle_based.calc_vehicle_speed_bw_stops(seg_dist_m,
+        max_spd_km_h, accel_m_s2, stop_dwell_time_s)
+    return spd    
+
+# TODO:- name functions individually in the register?
+#  Then will allow user from the cmd-line to name these, and 
+#  pass in time-period etc.
+
+# Name :-> (check mways seg exists func, off-peak func, peak func)
+SPEED_FUNC_SETS_REGISTER = {
+    "constant_peak_offpeak": (None, constant_speed_max, \
+        constant_speed_max_peak),
+    "peak_speed_dist_based": (None, constant_speed_max, \
+        calc_peak_speed_melb_bus), 
+    "peak_speed_dist_based_mways_check": (check_mways_status_exists, 
+        constant_speed_offpeak_mway_check,
+        buses_peak_with_mway_check),
+    }
+
+SPEED_FUNCS_REGISTER = {
+    "segment_length_dependent": calc_speed_based_on_segment_length,
+    }

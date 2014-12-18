@@ -43,11 +43,21 @@ speed_func_params = {
         'accel': 1.0,
         'stop_dwell_time': 20.0,
         },
-    'train': {
+    'fast_tram': {
+        'full_speed': 80,
+        'accel': 1.2,
+        'stop_dwell_time': 15.0,
+        },
+    'melb_train': {
+        'full_speed': 100,
+        'accel': 1.0,
+        'stop_dwell_time': 30.0,
+        },
+    'fast_train': {
         'full_speed': 120,
         'accel': 1.0,
         'stop_dwell_time': 20.0,
-        }
+        },
     }
 
 def plot_mode_speeds_for_segment_lengths(min_dist, max_dist, dist_inc):

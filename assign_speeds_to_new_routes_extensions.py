@@ -13,15 +13,51 @@ from osgeo import ogr, osr
 import misc_utils
 import mode_timetable_info as m_t_info
 import route_segs
+import seg_speed_models
 import topology_shapefile_data_model as tp_model
 import time_periods_speeds_model as tps_speeds_model
 
 # We don't want to further round down already rounded values.
 SPEED_ROUND_PLACES = 10
 
+def get_orig_route_gtfs_pair_with_speeds_nearest(
+        orig_route_gtfs_stop_pairs_w_speeds, starting_in_ext_section,
+        ext_r_seg_refs, last_orig_seg_ref_ii, dir_index,
+        stop_id_to_gtfs_stop_id_map, stop_id_to_name_map):
+    # Handle the case where the last orig segment doesn't have speed 
+    # entries in this current file.
+    seg_ref_ii_to_try = last_orig_seg_ref_ii
+    shifted_last = 0
+    while True:
+        stop_ids_ordered = route_segs.get_stop_ids_in_travel_dir(
+            ext_r_seg_refs, seg_ref_ii_to_try, dir_index)
+
+        closest_gtfs_ids_to_last_orig_seg = tp_model.get_gtfs_stop_ids(
+            stop_ids_ordered, stop_id_to_gtfs_stop_id_map, to_str=True)
+        if closest_gtfs_ids_to_last_orig_seg in \
+                orig_route_gtfs_stop_pairs_w_speeds:
+            # Good have found best speeds entries to use.
+            break
+        print "\t\tWarning:- couldn't get speed for calc. last "\
+            "original seg ii %d, from stop ids %s ('%s' to '%s'), "\
+            "shifting back along route by 1."\
+            % (seg_ref_ii_to_try, stop_ids_ordered,\
+               stop_id_to_name_map[stop_ids_ordered[0]],\
+               stop_id_to_name_map[stop_ids_ordered[1]])
+        shifted_last += 1
+        if starting_in_ext_section:
+            seg_ref_ii_to_try += shifted_last
+            if seg_ref_ii_to_try >= len(ext_r_seg_refs)-1:
+                return None
+        else:        
+            seg_ref_ii_to_try -= shifted_last
+            if seg_ref_ii_to_try < 0:
+                return None
+    return closest_gtfs_ids_to_last_orig_seg
+
 def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
         stop_id_to_gtfs_stop_id_map, stop_id_to_name_map,
-        speeds_dir_in, speeds_dir_out):
+        speeds_dir_in, speeds_dir_out, speed_func, mode_config):
 
     if not os.path.exists(speeds_dir_out):
         os.makedirs(speeds_dir_out)
@@ -34,7 +70,6 @@ def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
     routes_processed = {}
     for route_def in route_defs:
         routes_processed[route_def.id] = False
-
 
     print "Creating per-time period speed entries for the %d new/extended "\
         "routes:" % len(route_ext_defs)
@@ -68,6 +103,7 @@ def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
         ext_r_seg_refs = route_segs.create_ordered_seg_refs_from_ids(
             ext_route.ordered_seg_ids, segs_lookup_table)
         r_stop_ids = route_segs.extract_stop_list_along_route(ext_r_seg_refs)
+
         # Get info about the connecting stop, segment.
         conn_stop_ii = r_stop_ids.index(conn_stop_id)
         if upd_dir_name == ext_route.dir_names[0]:
@@ -80,17 +116,19 @@ def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
             last_orig_seg_ref_ii = conn_stop_ii
         else:
             last_orig_seg_ref_ii = conn_stop_ii - 1
-        last_orig_seg_ref = ext_r_seg_refs[last_orig_seg_ref_ii]
-        last_orig_seg = segs_lookup_table[last_orig_seg_ref.seg_id]
-        last_orig_seg_gtfs_ids = tp_model.get_gtfs_stop_id_pair_of_segment(
-            last_orig_seg, stop_id_to_gtfs_stop_id_map)
-        # Stringify
-        last_orig_seg_gtfs_ids = tuple(map(str, last_orig_seg_gtfs_ids))
-        last_seg_stop_name_a = stop_id_to_name_map[last_orig_seg_ref.first_id]
-        last_seg_stop_name_b = stop_id_to_name_map[last_orig_seg_ref.second_id]
-        print "\t...calculated last original segment to copy speeds from\n"\
-            "\t  is b/w stops '%s' and '%s'." \
-            % (last_seg_stop_name_a, last_seg_stop_name_b)
+
+        if not speed_func:
+            last_orig_seg_ref = ext_r_seg_refs[last_orig_seg_ref_ii]
+            last_orig_seg = segs_lookup_table[last_orig_seg_ref.seg_id]
+            last_orig_seg_gtfs_ids = tp_model.get_gtfs_stop_id_pair_of_segment(
+                last_orig_seg, stop_id_to_gtfs_stop_id_map)
+            # Stringify
+            last_orig_seg_gtfs_ids = tuple(map(str, last_orig_seg_gtfs_ids))
+            last_seg_stop_name_a = stop_id_to_name_map[last_orig_seg_ref.first_id]
+            last_seg_stop_name_b = stop_id_to_name_map[last_orig_seg_ref.second_id]
+            print "\t...calculated ideal last original segment to copy speeds "\
+                "from\n\t  is b/w stops '%s' and '%s'." \
+                % (last_seg_stop_name_a, last_seg_stop_name_b)
 
         stop_gtfs_ids_to_names_map = {}
         for s_id in r_stop_ids:
@@ -157,57 +195,49 @@ def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
                     speeds_dir_in, name_a, name_b,
                     serv_period, trips_dir_file_ready,
                     sort_seg_stop_id_pairs=False)
+
             # We need to calc connecting stop order here, as looking it up 
             #  from speeds file depends on direction of travel.
             dir_index = ext_route.dir_names.index(working_dir_name)
-            # Now order the stops in direction of travel and get GTFS IDs
-            # Handle the case where the last orig segment doesn't have speed 
-            # entries in this current file.
-            gtfs_stop_pairs_this_file = route_avg_speeds_in.keys()
-            shifted_last = 0
-            while True:
-                stop_ids_ordered = route_segs.get_stop_ids_in_travel_dir(
-                    ext_r_seg_refs, last_orig_seg_ref_ii, dir_index)
-                last_orig_seg_gtfs_ids = tp_model.get_gtfs_stop_ids(
-                    stop_ids_ordered, stop_id_to_gtfs_stop_id_map, to_str=True)
-                if last_orig_seg_gtfs_ids in gtfs_stop_pairs_this_file:
-                    # Good have found default speeds entries to use.
-                    break
-                print "\t\tWarning:- couldn't get speed for calc. last "\
-                    "original seg ii %d, from stop ids %s ('%s' to '%s'), "\
-                    "shifting back along route by 1."\
-                    % (last_orig_seg_ref_ii, stop_ids_ordered,\
-                       stop_id_to_name_map[stop_ids_ordered[0]],\
-                       stop_id_to_name_map[stop_ids_ordered[1]])
-                shifted_last += 1
-                if starting_in_ext_section:
-                    if conn_stop_ii + shifted_last >= len(r_stop_ids)-1:
-                        print "Error! We have not found any entries for "\
-                            "connecting segment default values."
-                        assert 0
-                    last_orig_seg_ref_ii = conn_stop_ii + shifted_last
-                else:        
-                    if conn_stop_ii - shifted_last <= 1:
-                        print "Error! We have not found any entries for "\
-                            "connecting segment default values."
-                        assert 0
-                    last_orig_seg_ref_ii = conn_stop_ii - 1 - shifted_last
+
+            last_orig_seg_gtfs_ids_in_dir = None
+            if not speed_func:
+                gtfs_stop_pairs_this_file = route_avg_speeds_in.keys()
+                last_orig_seg_gtfs_ids_in_dir = \
+                    get_orig_route_gtfs_pair_with_speeds_nearest(
+                        gtfs_stop_pairs_this_file, starting_in_ext_section,
+                        ext_r_seg_refs, last_orig_seg_ref_ii, dir_index,
+                        stop_id_to_gtfs_stop_id_map, stop_id_to_name_map)
+                if not last_orig_seg_gtfs_ids_in_dir:
+                    print "Error! We have not found any entries for "\
+                        "connecting segment default values."
+
             route_avg_speeds_out = {}
             seg_distances_out = {}
             for seg_ii, seg_ref in enumerate(ext_r_seg_refs):
+                # Now order the stops in direction of travel and get GTFS IDs
                 stop_ids_ordered = route_segs.get_stop_ids_in_travel_dir(
                     ext_r_seg_refs, seg_ii, dir_index)
                 seg_gtfs_ids = tp_model.get_gtfs_stop_ids(stop_ids_ordered,
                     stop_id_to_gtfs_stop_id_map, to_str=True)
                 if (starting_in_ext_section and seg_ii < conn_stop_ii) or \
                     (not starting_in_ext_section and seg_ii >= conn_stop_ii):
-                    # We are in an extended section:- need to copy speeds
-                    # of closest existing
-                    route_avg_speeds_out[seg_gtfs_ids] = \
-                        route_avg_speeds_in[last_orig_seg_gtfs_ids]
-                    # And save new seg distance.
+                    # We are in an extended section:- 
+                    # save new seg distance.
                     seg_distances_out[seg_gtfs_ids] = \
                         seg_ref.route_dist_on_seg
+                    if not speed_func:
+                        # copy speeds of closest existing
+                        route_avg_speeds_out[seg_gtfs_ids] = \
+                            route_avg_speeds_in[last_orig_seg_gtfs_ids_in_dir]
+                    else:
+                        ext_segment = segs_lookup_table[seg_ref.seg_id]
+                        new_calc_speeds = []
+                        for tp in time_periods:
+                            new_calc_speed = speed_func(ext_segment, tp, mode_config)
+                            new_calc_speeds.append(new_calc_speed)
+                        route_avg_speeds_out[seg_gtfs_ids] = \
+                            new_calc_speeds
                 else:
                     # Normal section :- just copy entries from previous.
                     try:
@@ -269,6 +299,9 @@ def main():
         help='Path in which to read input speeds files.')
     parser.add_option('--output_speeds_dir', dest='output_speeds_dir', 
         help='Path in which to create output speeds files.')
+    parser.add_option('--speed_func', dest='speed_func',
+        help='(Optional) speed function to use to set speeds in '\
+            'network extensions (otherwise the extension approach used.)')
     (options, args) = parser.parse_args()
 
     if options.segments is None:
@@ -282,7 +315,19 @@ def main():
         parser.print_help()
         parser.error("Service option requested '%s' not in allowed set, of %s" \
             % (options.service, m_t_info.settings.keys()))
-        
+    if options.speed_func:
+        try:
+            speed_func = \
+                seg_speed_models.SPEED_FUNCS_REGISTER[options.speed_func]
+        except KeyError:
+            parser.print_help()
+            parser.error("Speed func requested '%s' not in register of "
+                "available speed funcs, which are %s" \
+                % (options.speed_func, \
+                   seg_speed_models.SPEED_FUNCS_REGISTER.keys()))
+    else:
+        speed_func = None
+
     mode_config = m_t_info.settings[options.service]
 
     route_defs = route_segs.read_route_defs(options.route_defs)
@@ -302,7 +347,8 @@ def main():
 
     create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
         stop_id_to_gtfs_stop_id_map, stop_id_to_name_map,
-        options.input_speeds_dir, options.output_speeds_dir)
+        options.input_speeds_dir, options.output_speeds_dir,
+        speed_func, mode_config)
 
     # Close the shape files
     segs_shp.Destroy()
