@@ -199,7 +199,7 @@ def find_valid_speed_nearest_to_period(tp_speeds, tp_i):
     tp_try_i = 0
     tp_i_shift = 0
     seg_speed = -1
-    while tp_try_i <= len(tp_speeds):
+    while tp_try_i < len(tp_speeds):
         tp_i_to_read = tp_i + tp_i_shift
         if tp_i_to_read < len(tp_speeds) and tp_i_to_read >= 0:
             tp_try_i += 1    
@@ -211,6 +211,8 @@ def find_valid_speed_nearest_to_period(tp_speeds, tp_i):
         else:
             tp_i_shift *= -1 
         loop_i += 1
+        if loop_i > (2 * len(tp_speeds)):
+            assert 0
     return seg_speed    
 
 class MultipleTimePeriodsSegSpeedInfo:
