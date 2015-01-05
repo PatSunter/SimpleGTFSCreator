@@ -203,7 +203,7 @@ settings['bus-motorway']['on_street'] = settings['bus']
 
 # These are plain strings, as required by the transitfeed library
 START_DATE_STR = '20130101'
-END_DATE_STR = '20141231'
+END_DATE_STR = '20151231'
 
 def calc_total_service_time_elapsed(serv_headways, curr_time):
     first_period_start_time = serv_headways[0][TP_START_COL]
