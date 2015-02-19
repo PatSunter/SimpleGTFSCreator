@@ -552,10 +552,6 @@ def build_trav_times_by_dir_serv_period_between_selected_stops(trip_dict, p_keys
     for dir_period_pair in route_dir_serv_periods:
         all_patterns_stop_visit_times[dir_period_pair] = {}
 
-    # This lookup dict will be used for keeping track of distances between
-    #  needed stop pairs (segments) for this route.
-    seg_distances = {}
-    
     for p_ii, p_key in enumerate(p_keys):
         trips = trip_dict[p_keys[p_ii]]
         # Now add relevant info to all stop patterns list.
@@ -599,7 +595,7 @@ def build_trav_times_by_dir_serv_period_between_selected_stops(trip_dict, p_keys
                 # Fortunately Python's default sort does it this way.
                 all_patterns_entry[stop_id_pair].sort()
 
-    return all_patterns_stop_visit_times, seg_distances
+    return all_patterns_stop_visit_times
 
 def calc_avg_segment_property_during_time_periods(schedule, seg_properties_dict,
         time_periods, sort_seg_stop_id_pairs=False):
@@ -754,7 +750,7 @@ def extract_route_trav_time_info_by_time_periods_between_selected_stops(schedule
 
     route_dir_serv_periods = extract_route_dir_serv_period_tuples(trip_dict)
 
-    all_patterns_segment_trav_time_infos, seg_distances = \
+    all_patterns_segment_trav_time_infos = \
         build_trav_times_by_dir_serv_period_between_selected_stops(trip_dict, p_keys,
             route_dir_serv_periods, min_dist_for_speed_calc_m,
             min_time_for_speed_calc_s, stop_ids_of_interest)
@@ -798,7 +794,7 @@ def extract_route_trav_time_info_by_time_periods_between_selected_stops(schedule
             route_avg_trav_times_during_time_periods[("all_dirs", serv_period)] = \
                 avg_trav_times
 
-    return route_avg_trav_times_during_time_periods, seg_distances
+    return route_avg_trav_times_during_time_periods
 
 def extract_route_freq_info_by_time_periods_by_pattern(schedule,
         gtfs_route_id, time_periods):
