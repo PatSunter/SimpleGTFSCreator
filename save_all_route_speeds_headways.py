@@ -1,7 +1,7 @@
 #!/usr/bin/env python2
 
-# This script just to create a new GTFS schedule based off an old one,
-#  but subsetting the list of routes.
+# Script for extracting and saving info about speed and frequency between stop
+# pairs and along routes, from a GTFS file.
 
 import os, sys
 import os.path
