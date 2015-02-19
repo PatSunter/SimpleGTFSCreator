@@ -545,28 +545,91 @@ def build_segment_speeds_by_dir_serv_period(trip_dict, p_keys,
 
     return all_patterns_stop_visit_times, seg_distances
 
-def calc_avg_speeds_during_time_periods(schedule, seg_speeds_dict,
+def build_trav_times_by_dir_serv_period_between_selected_stops(trip_dict, p_keys,
+        route_dir_serv_periods, min_dist_for_speed_calc_m,
+        min_time_for_speed_calc_s, selected_stop_ids):
+    all_patterns_stop_visit_times = {}
+    for dir_period_pair in route_dir_serv_periods:
+        all_patterns_stop_visit_times[dir_period_pair] = {}
+
+    # This lookup dict will be used for keeping track of distances between
+    #  needed stop pairs (segments) for this route.
+    seg_distances = {}
+    
+    for p_ii, p_key in enumerate(p_keys):
+        trips = trip_dict[p_keys[p_ii]]
+        # Now add relevant info to all stop patterns list.
+        # Note:- since this includes different dir, period pairs, need
+        #  to do individually.
+        for trip in trips:
+            trip_dir = trip['trip_headsign']
+            trip_serv_period = trip['service_id']
+            all_patterns_entry = \
+                all_patterns_stop_visit_times[(trip_dir,trip_serv_period)]
+            #trip_stop_time_pairs = list(misc_utils.pairs(trip.GetStopTimes()))
+            #for seg_i, stop_time_pair in enumerate(trip_stop_time_pairs):
+            prev_sel_stop_id = None
+            prev_sel_stop_time = None
+            for stop_i, stop_time_tuple in enumerate(trip.GetStopTimes()):
+                stop_id = stop_time_tuple.stop.stop_id
+                if stop_id not in selected_stop_ids:
+                    continue
+                else:
+                    if prev_sel_stop_id:
+                        # We can save this pair's speed.
+                        curr_stop_time = stop_time_tuple.arrival_secs  
+                        trav_time_between_stops = \
+                            (curr_stop_time - prev_sel_stop_time) / 60.0
+                        s_id_pair = (prev_sel_stop_id, stop_id)
+                        seg_ttime_tuple = (prev_sel_stop_time, \
+                            curr_stop_time, trav_time_between_stops)
+                        if s_id_pair not in all_patterns_entry:
+                            all_patterns_entry[s_id_pair] = [seg_ttime_tuple]
+                        else:
+                            all_patterns_entry[s_id_pair].append(seg_ttime_tuple)
+                    prev_sel_stop_time = stop_time_tuple.arrival_secs
+                    prev_sel_stop_id = stop_id
+
+    # Sort results before returning
+    for route_dir, serv_period in route_dir_serv_periods:
+            all_patterns_entry = \
+                all_patterns_stop_visit_times[(route_dir,serv_period)]
+            for stop_id_pair in all_patterns_entry.iterkeys():
+                # We want to sort these by arrival time at first stop in pair.
+                # Fortunately Python's default sort does it this way.
+                all_patterns_entry[stop_id_pair].sort()
+
+    return all_patterns_stop_visit_times, seg_distances
+
+def calc_avg_segment_property_during_time_periods(schedule, seg_properties_dict,
         time_periods, sort_seg_stop_id_pairs=False):
-    """Note:- assumes and requires that the seg_speeds_dict is already in
+    """Calculates the average of multiple values for each segment (stop ID
+    pair), grouping into time periods. The 'property' could be e.g. speed, or
+    travel time.
+    Note:- assumes and requires that the seg_properties_dict is already in
     sorted order."""
     
-    speeds_in_periods = {}
-    for s_id_pair, seg_speed_tuples in seg_speeds_dict.iteritems():
+    properties_in_periods = {}
+    for s_id_pair, seg_property_tuples in seg_properties_dict.iteritems():
         if sort_seg_stop_id_pairs:
             out_s_id_pair = tuple(sorted(s_id_pair))
         else:
             out_s_id_pair = s_id_pair
-        speeds_in_periods[out_s_id_pair] = \
+        properties_in_periods[out_s_id_pair] = \
             [[] for dummy in xrange(len(time_periods))]
         curr_period_i = 0
         p_start, p_end = time_periods[0]
         pstart_sec = misc_utils.tdToSecs(p_start)
         pend_sec = misc_utils.tdToSecs(p_end)
-        for pt_a_time, pt_b_time, seg_speed_km_h in seg_speed_tuples:
+        for pt_a_time, pt_b_time, seg_property in seg_property_tuples:
+            if pt_a_time < pstart_sec:
+                # This travel time pair is before any of the time periods of interest.
+                # So skip to next occurence of the day.
+                continue
             if pt_a_time >= pstart_sec and pt_a_time <= pend_sec:
-                spds_in_period = \
-                    speeds_in_periods[out_s_id_pair][curr_period_i]
-                spds_in_period.append(seg_speed_km_h)
+                times_in_period = \
+                    properties_in_periods[out_s_id_pair][curr_period_i]
+                times_in_period.append(seg_property)
             else:
                 curr_period_i += 1
                 if curr_period_i >= len(time_periods):
@@ -578,31 +641,31 @@ def calc_avg_speeds_during_time_periods(schedule, seg_speeds_dict,
                     pstart_sec = misc_utils.tdToSecs(p_start)
                     pend_sec = misc_utils.tdToSecs(p_end)
                     if pt_a_time >= pstart_sec and pt_a_time <= pend_sec:
-                        spds_in_period = \
-                            speeds_in_periods[out_s_id_pair][curr_period_i]
-                        spds_in_period.append(seg_speed_km_h)
+                        times_in_period = \
+                            properties_in_periods[out_s_id_pair][curr_period_i]
+                        times_in_period.append(seg_property)
                         break
                     curr_period_i += 1
-    avg_speeds = {}
-    speed_min_maxes = {}
-    for s_id_pair in seg_speeds_dict.iterkeys():
+    avg_properties = {}
+    property_min_maxes = {}
+    for s_id_pair in seg_properties_dict.iterkeys():
         if sort_seg_stop_id_pairs:
             out_s_id_pair = tuple(sorted(s_id_pair))
         else:
             out_s_id_pair = s_id_pair
-        avg_speeds[out_s_id_pair] = []
-        speed_min_maxes[out_s_id_pair] = []
+        avg_properties[out_s_id_pair] = []
+        property_min_maxes[out_s_id_pair] = []
         for period_i in range(len(time_periods)):
-            s_in_p = speeds_in_periods[out_s_id_pair][period_i]
+            s_in_p = properties_in_periods[out_s_id_pair][period_i]
             if len(s_in_p) == 0:
-                avg_speeds[out_s_id_pair].append(-1)
-                speed_min_maxes[out_s_id_pair].append(None)
+                avg_properties[out_s_id_pair].append(-1)
+                property_min_maxes[out_s_id_pair].append(None)
             else:
-                avg_speed_in_p = sum(s_in_p) / float(len(s_in_p))
-                avg_speeds[out_s_id_pair].append(avg_speed_in_p)
-                speed_min_maxes[out_s_id_pair].append(
+                avg_property_in_p = sum(s_in_p) / float(len(s_in_p))
+                avg_properties[out_s_id_pair].append(avg_property_in_p)
+                property_min_maxes[out_s_id_pair].append(
                     (min(s_in_p), max(s_in_p)))
-    return avg_speeds
+    return avg_properties
 
 def extract_route_dir_serv_period_tuples(trip_patterns_dict):
     # Handle these as tuples, since we want to make sure we only consider
@@ -662,10 +725,80 @@ def extract_route_speed_info_by_time_periods(schedule, gtfs_route_id,
     for dir_period_pair in route_dir_serv_periods:
             all_patterns_entry = \
                 all_patterns_segment_speed_infos[dir_period_pair]
-            avg_speeds = calc_avg_speeds_during_time_periods(schedule,
+            avg_speeds = calc_avg_segment_property_during_time_periods(schedule,
                 all_patterns_entry, time_periods, sort_seg_stop_id_pairs)
             route_avg_speeds_during_time_periods[dir_period_pair] = avg_speeds
     return route_avg_speeds_during_time_periods, seg_distances
+
+def extract_route_trav_time_info_by_time_periods_between_selected_stops(schedule,
+        gtfs_route_id,
+        time_periods, 
+        stop_ids_of_interest,
+        min_dist_for_speed_calc_m=0,
+        min_time_for_speed_calc_s=60,
+        sort_seg_stop_id_pairs=False,
+        combine_dirs=False):
+    """Note: See doc for function extract_route_freq_info_by_time_periods()
+    for explanation of time_periods argument format."""
+
+    if combine_dirs:
+        if not sort_seg_stop_id_pairs:
+            print "Warning: over-riding sort_seg_stop_id_pairs to be True"\
+                " since combine_dirs also True, and sorting seg stop ID pairs"\
+                " necessary in this case."
+        sort_seg_stop_id_pairs = True
+
+    gtfs_route = schedule.routes[str(gtfs_route_id)]
+    trip_dict = gtfs_route.GetPatternIdTripDict()
+    p_keys = trip_dict.keys()
+
+    route_dir_serv_periods = extract_route_dir_serv_period_tuples(trip_dict)
+
+    all_patterns_segment_trav_time_infos, seg_distances = \
+        build_trav_times_by_dir_serv_period_between_selected_stops(trip_dict, p_keys,
+            route_dir_serv_periods, min_dist_for_speed_calc_m,
+            min_time_for_speed_calc_s, stop_ids_of_interest)
+
+    route_avg_trav_times_during_time_periods = {}
+    if not combine_dirs:
+        for dir_period_pair in route_dir_serv_periods:
+            all_patterns_entry = \
+                all_patterns_segment_trav_time_infos[dir_period_pair]
+            avg_trav_times = calc_avg_segment_property_during_time_periods(schedule,
+                all_patterns_entry, time_periods, sort_seg_stop_id_pairs)
+            route_avg_trav_times_during_time_periods[dir_period_pair] = \
+                avg_trav_times
+    else:
+        route_serv_periods = list(set(map(operator.itemgetter(1),
+            route_dir_serv_periods)))
+
+        for serv_period in route_serv_periods:
+            trav_time_infos = []
+            all_patterns_entries = []
+            for dir_period_pair in route_dir_serv_periods:
+                if dir_period_pair[1] == serv_period:
+                    all_patterns_entries.append(
+                        all_patterns_segment_trav_time_infos[dir_period_pair])
+            # Now we need to combine these entries for multiple dirs
+            combined_entries = {}
+            for pattern_entries in all_patterns_entries:
+                for stop_id_pair, stop_trav_times in \
+                        pattern_entries.iteritems():
+                    sorted_id_pair = tuple(sorted(stop_id_pair))
+                    if sorted_id_pair not in combined_entries:
+                        combined_entries[sorted_id_pair] = stop_trav_times
+                    else:    
+                        combined_entries[sorted_id_pair] += stop_trav_times
+            # We need to sort the times internally here.
+            for sorted_id_pair, stop_trav_times in \
+                    combined_entries.iteritems():
+                combined_entries[sorted_id_pair] = sorted(stop_trav_times)
+            avg_trav_times = calc_avg_segment_property_during_time_periods(schedule,
+                combined_entries, time_periods, sort_seg_stop_id_pairs)
+            route_avg_trav_times_during_time_periods[("all_dirs", serv_period)] = \
+                avg_trav_times
+
+    return route_avg_trav_times_during_time_periods, seg_distances
 
 def extract_route_freq_info_by_time_periods_by_pattern(schedule,
         gtfs_route_id, time_periods):
@@ -754,11 +887,11 @@ def write_route_speed_info_by_time_periods(schedule, gtfs_route_id,
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
-    gtfs_route = schedule.routes[gtfs_route_id]
+    gtfs_route = schedule.routes[str(gtfs_route_id)]
     trip_dict = gtfs_route.GetPatternIdTripDict()
-    route_dir_serv_periods = extract_route_dir_serv_period_tuples(trip_dict)
 
-    for route_dir, serv_period in route_dir_serv_periods:
+    for route_dir, serv_period in \
+            route_avg_speeds_during_time_periods.iterkeys():
         avg_speeds = route_avg_speeds_during_time_periods[\
             (route_dir, serv_period)]
         s_ids_this_route_period = extract_stop_ids_from_pairs(
