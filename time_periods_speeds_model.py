@@ -39,10 +39,14 @@ def write_avg_speeds_on_segments(stop_gtfs_ids_to_names_map, period_avg_speeds,
                 avg_speeds_on_seg)
         else:
             avg_speeds_on_seg_output = avg_speeds_on_seg
+        if seg_distances:
+            dist = round(seg_distances[s_id_pair], round_places)
+        else:
+            dist = 0
         writer.writerow(
             [s_id_pair[0], stop_gtfs_ids_to_names_map[int(s_id_pair[0])], \
             s_id_pair[1],  stop_gtfs_ids_to_names_map[int(s_id_pair[1])], \
-            round(seg_distances[s_id_pair], round_places)] \
+            dist] \
             + avg_speeds_on_seg_output)
     csv_file.close()
     return
