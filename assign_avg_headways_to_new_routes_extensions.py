@@ -25,10 +25,11 @@ def create_new_avg_headway_entries(
         input_hways_fname, output_hways_fname,
         serv_periods, time_window_start, time_window_end, def_headway):
 
-    avg_hways_all_stops_in, tps, r_ids_to_names_map = \
+    avg_hways_all_stops_in, tps, r_ids_to_names_map_in = \
         tps_hways_model.read_route_hways_all_routes_all_stops(input_hways_fname)
 
     avg_hways_all_stops_out = copy.deepcopy(avg_hways_all_stops_in)
+    r_ids_to_names_map_out = copy.deepcopy(r_ids_to_names_map_in)
 
     null_hways = [-1] * len(tps)
     def_hways_in_tps_out = tps_hways_model.decrease_hways_to_max_in_window(
@@ -43,7 +44,7 @@ def create_new_avg_headway_entries(
         # Need to get the gtfs route ID, and names, of the old route.
         old_gtfs_r_id = None
         old_r_s_name_found, old_r_l_name_found = None, None
-        for r_id, r_name_pair in r_ids_to_names_map.iteritems():
+        for r_id, r_name_pair in r_ids_to_names_map_in.iteritems():
             if (old_r_s_name or old_r_l_name) and \
                   (not old_r_s_name or old_r_s_name == r_name_pair[0]) \
                    and (not old_r_l_name or old_r_l_name == r_name_pair[1]):
@@ -51,7 +52,14 @@ def create_new_avg_headway_entries(
                 old_r_s_name_found = r_name_pair[0]
                 old_r_l_name_found = r_name_pair[1]
                 break
-        assert old_gtfs_r_id
+        if not old_gtfs_r_id:
+            print "Error: while creating new average headway entries "\
+                "for route ext def. '%s', couldn't find an old route with "\
+                "specified short/long names '%s' and '%s' respectively."\
+                % (route_ext_def.ext_name, old_r_s_name, old_r_l_name)
+            import pdb
+            pdb.set_trace()
+            assert old_gtfs_r_id
 
         ext_route_spec = route_segs.Route_Def(None, ext_r_s_name, ext_r_l_name,
             None, None)
@@ -67,7 +75,7 @@ def create_new_avg_headway_entries(
             r_s_name_out = old_r_s_name_found
         if not r_l_name_out:
             r_l_name_out = old_r_l_name_found
-        r_ids_to_names_map[ext_gtfs_r_id] = (r_s_name_out, r_l_name_out)
+        r_ids_to_names_map_out[ext_gtfs_r_id] = (r_s_name_out, r_l_name_out)
 
         if route_ext_def.ext_type == tp_model.ROUTE_EXT_TYPE_EXTENSION:
             upd_dir_name = route_ext_def.upd_dir_name
@@ -87,6 +95,10 @@ def create_new_avg_headway_entries(
                 dpp_2_old = (replaced_dir_name, serv_period)
                 avg_hways_all_stops_out[ext_gtfs_r_id][dpp_2_new] = \
                     avg_hways_all_stops_in[old_gtfs_r_id][dpp_2_old]
+            # Only delete entries for out routes in the case of
+            # extensions.
+            del(r_ids_to_names_map_out[old_gtfs_r_id])
+            del(avg_hways_all_stops_out[old_gtfs_r_id])
         else:
             avg_hways_all_stops_out[ext_gtfs_r_id] = {}
             dir_period_pairs_needed = itertools.product(ext_route.dir_names,
@@ -94,11 +106,10 @@ def create_new_avg_headway_entries(
             for dir_period_pair in dir_period_pairs_needed:
                 avg_hways_all_stops_out[ext_gtfs_r_id][dir_period_pair] = \
                     def_hways_in_tps_out
-        del(r_ids_to_names_map[old_gtfs_r_id])
-        del(avg_hways_all_stops_out[old_gtfs_r_id])
-    tps_hways_model.write_route_hways_all_routes_all_stops(r_ids_to_names_map,
-        tps, avg_hways_all_stops_out, output_hways_fname,
-        round_places=HEADWAY_ROUND_PLACES)
+
+    tps_hways_model.write_route_hways_all_routes_all_stops(
+        r_ids_to_names_map_out, tps, avg_hways_all_stops_out,
+        output_hways_fname, round_places=HEADWAY_ROUND_PLACES)
     return
 
 def main():
