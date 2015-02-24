@@ -738,10 +738,10 @@ def extract_route_trav_time_info_by_time_periods_between_selected_stops(schedule
     for explanation of time_periods argument format."""
 
     if combine_dirs:
-        if not sort_seg_stop_id_pairs:
-            print "Warning: over-riding sort_seg_stop_id_pairs to be True"\
-                " since combine_dirs also True, and sorting seg stop ID pairs"\
-                " necessary in this case."
+        #if not sort_seg_stop_id_pairs:
+        #    print "Warning: over-riding sort_seg_stop_id_pairs to be True"\
+        #        " since combine_dirs also True, and sorting seg stop ID pairs"\
+        #        " necessary in this case."
         sort_seg_stop_id_pairs = True
 
     gtfs_route = schedule.routes[str(gtfs_route_id)]
