@@ -398,11 +398,12 @@ def create_stops_shp_file_combined_from_existing(
 def add_stop(stops_lyr, stops_multipoint, stop_type, stop_geom, src_srs,
         mode_config, stop_name=None, gtfs_id=None):
     """Adds a stop to stops_lyr, and also its geometry to stops_multipoint. 
+
     In the case of stops_lyr, the new stops' geometry will be re-projected into
     the SRS of that layer before adding (hence need to pass srs_srs as an
     input var. In the case of stops_multipoint, the geometry will be added
-    as is, without reprojection (this is useful for geometrical operations
-    in the original SRS of the routes shapefile you're working with."""
+    as is, without reprojection (this assumes you have already handled
+    transforming the new stop_geom into an appropriate comparison SRS.)"""
     pt_id = stops_multipoint.GetGeometryCount()
     stops_multipoint.AddGeometry(stop_geom)
     #Create stop point, with needed fields etc.
