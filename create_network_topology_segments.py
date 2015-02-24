@@ -17,14 +17,14 @@ import mode_timetable_info as m_t_info
 
 DELETE_EXISTING = True
 # This skips building very short segments.
-#MIN_SEGMENT_LENGTH = 50.0
-MIN_SEGMENT_LENGTH = 50.0
+DEFAULT_MIN_SEGMENT_LENGTH = 50.0
 
 # TODO:- possibly need an option to process in reversed direction? Or
 #  make first stop based on ID, rather than location?
 def create_segments_along_route(rname, r_id, route_geom,
         input_stops_lyr, stops_near_route, stops_near_route_map,
-        all_seg_refs, warn_not_start_end=True):
+        all_seg_refs, min_segment_length=DEFAULT_MIN_SEGMENT_LENGTH,
+        warn_not_start_end=True):
     """Note: rname argument is purely for error message purposes."""
     seg_refs_this_route = []
     new_segs_cnt = 0
@@ -138,7 +138,7 @@ def create_segments_along_route(rname, r_id, route_geom,
                 #     next_stop_on_route_isect)
                 stop_is_to_remove_from_search.append(
                     next_stop_i_in_route_set)
-            elif (skipped_dist + dist_to_next) < MIN_SEGMENT_LENGTH and \
+            elif (skipped_dist + dist_to_next) < min_segment_length and \
                     unvisited_stop_is:
                 # Note the second clause above:- if we hit the very last
                 #  stop, don't skip.
@@ -150,7 +150,7 @@ def create_segments_along_route(rname, r_id, route_geom,
                 #    "%d. Dist to last = %.5fm. "\
                 #    "Dist skipped so far: %.5fm. "\
                 #    "(Loc on route is %s)." %\
-                #    (next_stop_id, MIN_SEGMENT_LENGTH,
+                #    (next_stop_id, min_segment_length,
                 #     last_stop_id_before_skipping, dist_to_next, \
                 #     skipped_dist, next_stop_on_route_isect)
                 stop_is_to_remove_from_search.append(
@@ -194,7 +194,7 @@ def create_segments_along_route(rname, r_id, route_geom,
     return seg_refs_this_route, new_segs_cnt
 
 def create_segments_from_route_geoms_and_stops(input_routes_lyr,
-        input_stops_lyr):
+        input_stops_lyr, min_segment_length=DEFAULT_MIN_SEGMENT_LENGTH):
     """Creates all the route segments, from a given set of route geometries,
     and stops along those routes.
     Note: See comments re projections below, it gets a bit tricky
@@ -232,7 +232,7 @@ def create_segments_from_route_geoms_and_stops(input_routes_lyr,
         seg_refs_this_route, new_segs_cnt = create_segments_along_route(
             rname, r_id, route_geom,
             input_stops_lyr, stops_near_route, stops_near_route_map,
-            all_seg_refs)
+            all_seg_refs, min_segment_length)
         route_seg_refs[r_id] = seg_refs_this_route
         end_cnt = len(all_seg_refs)
 
@@ -266,8 +266,13 @@ if __name__ == "__main__":
     parser.add_option('--route_defs_csv', dest='output_route_defs',
         help='Path to write route definitions (list of ordered segments) '
             'in each direction) CSV file to.')
+    parser.add_option('--min_segment_length', dest='min_segment_length',
+        help='Minimum segment length to create, in metres. Useful for '\
+            'skipping stops that may have been generated very close '\
+            'together. Defaults to %.1f.' % DEFAULT_MIN_SEGMENT_LENGTH)
     parser.add_option('--service', dest='service',
         help="Should be one of %s" % allowedServs)
+    parser.set_defaults(min_segment_length=str(DEFAULT_MIN_SEGMENT_LENGTH))
     (options, args) = parser.parse_args()    
 
     if options.inputroutes is None:
@@ -290,6 +295,17 @@ if __name__ == "__main__":
         parser.print_help()
         parser.error("Service option requested '%s' not in allowed set, of %s" \
             % (options.service, allowedServs))
+    min_segment_length_str = options.min_segment_length
+    try:
+        min_segment_length = float(min_segment_length_str)
+    except ValueError:
+        parser.print_help()
+        parser.error("min segment length must be a float or int value "
+            "greater than 0.0m.")
+    if min_segment_length < 0.0:
+        parser.print_help()
+        parser.error("min segment length must be a float or int value "
+            "greater than 0.0m.")
 
     mode_config = m_t_info.settings[options.service]
 
@@ -319,7 +335,7 @@ if __name__ == "__main__":
     route_defs_fname = options.output_route_defs
 
     all_seg_refs, segs_by_route = create_segments_from_route_geoms_and_stops(
-        input_routes_lyr, stops_lyr)
+        input_routes_lyr, stops_lyr, min_segment_length)
 
     # Now write to shapefiles
     route_segs.write_segments_to_shp_file(segments_lyr, stops_lyr,

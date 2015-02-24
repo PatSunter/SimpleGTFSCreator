@@ -269,7 +269,8 @@ def create_new_route_def_extend_existing(r_def_to_extend, r_ext_info,
 
 def create_extended_topology( existing_route_defs, existing_segs_lyr,
         all_stops_lyr, route_ext_infos, route_exts_lyr,
-        auto_create_route_gtfs_ids=False):
+        auto_create_route_gtfs_ids=False, 
+        min_segment_length=create_segs.DEFAULT_MIN_SEGMENT_LENGTH):
 
     existing_segs_lookup_table = tp_model.build_segs_lookup_table(
         existing_segs_lyr)
@@ -351,7 +352,8 @@ def create_extended_topology( existing_route_defs, existing_segs_lyr,
                 r_ext_info.ext_name, r_id, route_ext_geom, 
                 all_stops_lyr, stops_near_route_ext,
                 stops_near_route_ext_map,
-                combined_seg_refs, warn_not_start_end=False)
+                combined_seg_refs, warn_not_start_end=False,
+                min_segment_length=min_segment_length)
 
         if len(new_ext_seg_refs) == 0:
             print "Error, no new route segments generated for the "\
@@ -425,6 +427,11 @@ def main():
     parser.add_option('--output_route_defs', dest='output_route_defs',
         help='Path to write expanded set of route definitions, including '\
             'extensions, to (should end in .csv)')
+    parser.add_option('--min_segment_length', dest='min_segment_length',
+        help='Minimum segment length to create, in metres. Useful for '\
+            'skipping stops that may have been generated very close '\
+            'together. Defaults to %.1f.' \
+            % create_segs.DEFAULT_MIN_SEGMENT_LENGTH)    
     parser.add_option('--output_segments', dest='output_segments',
         help='Path to Shapefile of all line segments, including extensions, '
             'to create.')
@@ -433,7 +440,9 @@ def main():
             'stops.')
     parser.add_option('--service', dest='service',
         help="Should be one of %s" % allowedServs)
-    (options, args) = parser.parse_args()    
+    parser.set_defaults(
+        min_segment_length=str(create_segs.DEFAULT_MIN_SEGMENT_LENGTH))    
+    (options, args) = parser.parse_args()
 
     if not options.existing_route_defs:
         parser.print_help()
@@ -470,6 +479,17 @@ def main():
         parser.print_help()
         parser.error("Service option requested '%s' not in allowed set, of %s" \
             % (options.service, allowedServs))
+    min_segment_length_str = options.min_segment_length
+    try:
+        min_segment_length = float(min_segment_length_str)
+    except ValueError:
+        parser.print_help()
+        parser.error("min segment length must be a float or int value "
+            "greater than 0.0m.")
+    if min_segment_length < 0.0:
+        parser.print_help()
+        parser.error("min segment length must be a float or int value "
+            "greater than 0.0m.")
 
     mode_config = m_t_info.settings[options.service]
 
@@ -510,7 +530,8 @@ def main():
     output_route_defs, all_seg_refs = create_extended_topology(
         existing_route_defs, existing_segs_lyr, all_stops_lyr,
         route_ext_infos, route_exts_lyr,
-        auto_create_route_gtfs_ids=True)
+        auto_create_route_gtfs_ids=True,
+        min_segment_length=min_segment_length)
 
     # Write out the (extended/added) per-route definition lists
     print "Now writing out extended route defs to %s:" \
