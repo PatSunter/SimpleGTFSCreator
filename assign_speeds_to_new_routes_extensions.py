@@ -4,8 +4,6 @@ import os
 import os.path
 import sys
 import operator
-import glob
-import shutil
 from optparse import OptionParser
 
 from osgeo import ogr, osr
@@ -85,6 +83,10 @@ def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
             % (misc_utils.get_route_print_name(ext_r_s_name, ext_r_l_name), \
                misc_utils.get_route_print_name(old_r_s_name, old_r_l_name))
                
+        route_speeds_fnames = tps_speeds_model.get_avg_speeds_fnames(
+            speeds_dir_in, old_r_s_name, old_r_l_name)
+        assert len(route_speeds_fnames) >= 1
+
         conn_stop_gtfs_id = route_ext_def.exist_r_connect_stop_gtfs_id
         upd_dir_name = route_ext_def.upd_dir_name
 
@@ -124,8 +126,10 @@ def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
                 last_orig_seg, stop_id_to_gtfs_stop_id_map)
             # Stringify
             last_orig_seg_gtfs_ids = tuple(map(str, last_orig_seg_gtfs_ids))
-            last_seg_stop_name_a = stop_id_to_name_map[last_orig_seg_ref.first_id]
-            last_seg_stop_name_b = stop_id_to_name_map[last_orig_seg_ref.second_id]
+            last_seg_stop_name_a = stop_id_to_name_map[\
+                last_orig_seg_ref.first_id]
+            last_seg_stop_name_b = stop_id_to_name_map[\
+                last_orig_seg_ref.second_id]
             print "\t...calculated ideal last original segment to copy speeds "\
                 "from\n\t  is b/w stops '%s' and '%s'." \
                 % (last_seg_stop_name_a, last_seg_stop_name_b)
@@ -136,47 +140,13 @@ def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
             s_name = stop_id_to_name_map[s_id]
             stop_gtfs_ids_to_names_map[s_gtfs_id] = s_name
 
-        # The match depends on if we've specified both old route short
-        # and long names. If only one specified, need looser search.
-        old_route_print_name = misc_utils.routeNameFileReady(
-            old_r_s_name, old_r_l_name)
-        match_exps = []
-        if old_r_s_name and old_r_l_name:
-            match_exps.append("%s%s%s-speeds-*-all.csv" \
-                % (speeds_dir_in, os.sep, old_route_print_name))
-        elif old_r_s_name:
-            match_exps.append("%s%s%s-speeds-*-all.csv" \
-                % (speeds_dir_in, os.sep, old_route_print_name))
-            match_exps.append("%s%s%s-*-speeds-*-all.csv" \
-                % (speeds_dir_in, os.sep, old_route_print_name))
-        elif old_r_l_name:            
-            match_exps.append("%s%s%s-speeds-*-all.csv" \
-                % (speeds_dir_in, os.sep, old_route_print_name))
-            match_exps.append("%s%s*-%s-speeds-*-all.csv" \
-                % (speeds_dir_in, os.sep, old_route_print_name))
-        route_speeds_fnames = []
-        for match_exp in match_exps:    
-            route_speeds_fnames += glob.glob(match_exp)
-        assert len(route_speeds_fnames) >= 1
-
         # Now process all the existing speeds files for this route (or
         #  its old name), and make copies.
         for route_speeds_fname in route_speeds_fnames:
-            fname_sections = os.path.basename(route_speeds_fname).split('-')
-            # Index from the back, as name used depends on if 
-            # both short and long name specified.
-            serv_period = fname_sections[-3]
-            trips_dir_file_ready = fname_sections[-2]
-            if old_r_s_name and old_r_l_name:
-                name_a = old_r_s_name
-                name_b = old_r_l_name
-            else:
-                # We need to get these from the file.
-                name_b = fname_sections[-5]
-                try:
-                    name_a = fname_sections[-6]
-                except IndexError:
-                    name_a = None
+            name_a, name_b, trips_dir_file_ready, serv_period = \
+                tps_speeds_model.get_info_from_fname(route_speeds_fname,
+                    old_r_s_name, old_r_l_name)
+
             # First step is to work out the direction mapping from speeds
             #  file to new route def, given we replaced one of the dirs.
             if trips_dir_file_ready == \
@@ -186,6 +156,7 @@ def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
                 working_dir_name = upd_dir_name    
             print "\t  creating file for new dir/period '%s', '%s' "\
                 % (working_dir_name, serv_period)
+
             if misc_utils.routeDirStringToFileReady(working_dir_name) \
                     != trips_dir_file_ready:    
                 print "\t   (from old dir file '%s'):"\
@@ -269,15 +240,8 @@ def create_new_speed_entries(route_defs, route_ext_defs, segs_lookup_table,
     # Now copy all remaining route files
     for route_def in route_defs:
         if not routes_processed[route_def.id]:
-            route_print_name = misc_utils.routeNameFileReady(
-                route_def.short_name, route_def.long_name)
-            route_speeds_fnames = glob.glob(
-                "%s%s%s-speeds-*-all.csv" % (speeds_dir_in, os.sep, \
-                    route_print_name))
-            copy_path_out = misc_utils.get_win_safe_path(speeds_dir_out)
-            for speeds_fname in route_speeds_fnames:
-                copy_path_in = misc_utils.get_win_safe_path(speeds_fname)
-                shutil.copy(copy_path_in, copy_path_out)
+            tps_speeds_model.copy_route_speeds(route_def.short_name,
+                route_def.long_name, speeds_dir_in, speeds_dir_out)
     print "...done."
     return
 
