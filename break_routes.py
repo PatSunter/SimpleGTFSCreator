@@ -7,8 +7,8 @@ import os, sys
 import os.path
 import copy
 import operator
-import csv
 import itertools
+import json
 from optparse import OptionParser
 
 from osgeo import ogr, osr
@@ -279,6 +279,38 @@ def create_updated_hways_entries(input_hways_dir, output_hways_dir,
                     time_periods, out_fpath)            
     return
 
+def read_route_break_specs_from_json(route_break_spec_json_fname):
+    route_break_specs = []
+    
+    f = open(route_break_spec_json_fname, 'r')
+    break_specs_str = f.read()
+    breaks_json = json.loads(break_specs_str)
+    for r_break_dict in breaks_json:
+        try:
+            r_short_name = r_break_dict['route_short_name']
+        except KeyError:
+            r_short_name = None
+        try:
+            r_long_name = r_break_dict['route_long_name']
+        except KeyError:
+            r_long_name = None
+
+        rt_spec = route_segs.Route_Def(None, r_short_name, r_long_name,
+            (None, None), None)
+        
+        rt_subset_specs = []
+        for r_subset_dict in r_break_dict["subset_route_specs"]:
+            rt_subset_spec = Route_Subset_Spec(
+                r_subset_dict['route_short_name'],
+                r_subset_dict['route_long_name'],
+                r_subset_dict['first_stop'],
+                r_subset_dict['last_stop'],
+                r_subset_dict['dir_1'],
+                r_subset_dict['dir_2'] )
+            rt_subset_specs.append(rt_subset_spec)
+        route_break_specs.append((rt_spec, rt_subset_specs))
+    return route_break_specs
+
 def main():
     allowedServs = ', '.join(sorted(["'%s'" % key for key in \
         m_t_info.settings.keys()]))
@@ -294,7 +326,7 @@ def main():
             'segments of each route.')
     parser.add_option('--output_segments', dest='output_segments',
         help='(Output) shapefile of line segments.')
-    parser.add_option('--route_break_spec_csv', dest='route_break_spec_csv',
+    parser.add_option('--route_break_spec_json', dest='route_break_spec_json',
         help='Path to CSV file containing list of routes to break, and '
             'stops to break between.')
     parser.add_option('--service', dest='service',
@@ -313,9 +345,14 @@ def main():
             "(Requires input_hways_dir also specified).")
     (options, args) = parser.parse_args()
 
-    if options.route_break_spec_csv is None:
+    route_break_spec_json = options.route_break_spec_json
+    if route_break_spec_json is None:
         parser.print_help()
-        parser.error("No route break specs CSV file given.")
+        parser.error("No route break specs JSON file given.")
+    if not os.path.exists(route_break_spec_json):
+        parser.print_help()
+        parser.error("Route break specs JSON file given, %s, doesn't exist."\
+            % route_break_spec_json)
     if options.service not in m_t_info.settings:
         parser.print_help()
         parser.error("Service option requested '%s' not in allowed set, of %s" \
@@ -350,69 +387,7 @@ def main():
             parser.error("input_hways_dir specified, but no corresponding "\
                 "output hways dir was.")
 
-
-    # Get the list of route IDs we're going to break
-    #try:
-    #    route_breaks = get_route_def_and_break_stop_specs_from_csv(
-    #        options.route_break_spec_csv)
-    #except IOError:
-    #    parser.print_help()
-    #    print "\nError, route trip spec CSV file given, %s , failed to open." \
-    #        % (options.route_break_spec_csv)
-    #    sys.exit(1)
-    route_breaks = None
-    #TODO: read properly in from a file.
-    rt_901_spec = route_segs.Route_Def(None, "901", None, (None, None), None)
-    rt_901_subset = Route_Subset_Spec("901", 
-        "Frankston - The Pines SC (SMARTBUS Service)",
-        "Frankston Station/Young St",
-        "The Pines SC/Reynolds Rd",
-        "The Pines SC",
-        None)
-    rt_911_subset = Route_Subset_Spec("911", 
-        "The Pines SC - Melbourne Airport (SMARTBUS Service)",
-        "The Pines SC/Reynolds Rd",
-        "Melbourne Airport/Arrival Dr",
-        None,
-        "The Pines SC")
-    rt_902_spec = route_segs.Route_Def(None, "902", None, (None, None), None)
-    rt_902_subset = Route_Subset_Spec("902", 
-        "Chelsea Station - Doncaster Shoppingtown (SMARTBUS Service)",
-        "Chelsea Railway Station/Station St",
-        "Doncaster SC/Williamsons Rd",
-        "Doncaster Shoppingtown",
-        None)
-    rt_912_subset = Route_Subset_Spec("912", 
-        "Doncaster Shoppingtown - Airport West (SMARTBUS Service)",
-        "Doncaster SC/Williamsons Rd",
-        "Airport West Shoppingtown/Louis St",
-        None,
-        "Doncaster Shoppingtown")
-    rt_903_spec = route_segs.Route_Def(None, "903", None, (None, None), None)
-    rt_903_subset = Route_Subset_Spec("903", 
-        "Mordialloc - Northland Shopping Centre (SMARTBUS Service)",
-        "Mordialloc Shopping Centre/Centre Way",
-        "Northland Shopping Centre/Murray Rd",
-        "Northland Shopping Centre",
-        None)
-    rt_913_subset = Route_Subset_Spec("913", 
-        "Northland Shopping Centre - Essendon Station (SMARTBUS Service)",
-        "Northland Shopping Centre/Murray Rd",
-        "Essendon Railway Station/Russell St",
-        "Essendon Station",
-        "Northland Shopping Centre")
-    rt_933_subset = Route_Subset_Spec("933", 
-        "Essendon Station to Altona via Sunshine (SMARTBUS Service)",
-        "Essendon Railway Station/Russell St",
-        "Altona Railway Station/Railway St South",
-        "Altona",
-        "Essendon Station")
-
-    route_breaks = [
-        (rt_901_spec, (rt_901_subset, rt_911_subset)),
-        (rt_902_spec, (rt_902_subset, rt_912_subset)),
-        (rt_903_spec, (rt_903_subset, rt_913_subset, rt_933_subset)),
-        ]
+    route_breaks = read_route_break_specs_from_json(route_break_spec_json)
 
     print "Read in the list of %d routes you want to break ..." \
         % len(route_breaks)
@@ -442,7 +417,8 @@ def main():
             % (misc_utils.get_route_print_name(r_def_spec.short_name, \
                 r_def_spec.long_name), len(r_subset_specs))
 
-        match_r_defs = route_segs.get_matching_route_defs(output_r_defs, r_def_spec)
+        match_r_defs = route_segs.get_matching_route_defs(output_r_defs,
+            r_def_spec)
         if len(match_r_defs) == 0:
             print "Error:- the route you specified to be broken, with "\
                 "ID %s, short name '%s', long name '%s' - not found in "\
