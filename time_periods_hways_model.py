@@ -3,8 +3,13 @@ import os, sys
 import os.path
 from datetime import time, datetime, date, timedelta
 import csv
+import glob
+import shutil
 
 import misc_utils
+HWAYS_PER_STOP_HDRS = ['Stop_id','Stop_name']
+AVG_HWAYS_ALL_STOPS_HDRS = ['route_id','route_short_name','route_long_name',\
+    'serv_period','trips_dir']
 
 def get_route_hways_for_pattern_fname(r_short_name, r_long_name,
         pattern_i, route_dir, serv_period):
@@ -24,6 +29,61 @@ def get_route_hways_for_dir_period_fname(r_short_name, r_long_name,
         (rname_file_ready, serv_period, rdir_str)
     return fname
 
+def get_info_from_fname(route_hways_fname, r_s_name=None, r_l_name=None):
+    fname_sections = os.path.basename(route_hways_fname).split('-')
+    # Index from the back, as name used depends on if 
+    # both short and long name specified.
+    serv_period = fname_sections[-3]
+    trips_dir_file_ready = fname_sections[-2]
+    if r_s_name and r_l_name:
+        name_a = r_s_name
+        name_b = r_l_name
+    else:
+        # We need to get these from the file.
+        name_b = fname_sections[-5]
+        try:
+            name_a = fname_sections[-6]
+        except IndexError:
+            name_a = None
+    return name_a, name_b, trips_dir_file_ready, serv_period 
+
+def get_hways_fnames(hways_dir, r_short_name, r_long_name):
+    # The match depends on if we've specified both old route short
+    # and long names. If only one specified, need looser search.
+    route_print_name = misc_utils.routeNameFileReady(
+        r_short_name, r_long_name)
+    match_exps = []
+    if r_short_name and r_long_name:
+        match_exps.append("%s%s%s-hways-*-all.csv" \
+            % (hways_dir, os.sep, route_print_name))
+    elif r_short_name:
+        match_exps.append("%s%s%s-hways-*-all.csv" \
+            % (hways_dir, os.sep, route_print_name))
+        match_exps.append("%s%s%s-*-hways-*-all.csv" \
+            % (hways_dir, os.sep, route_print_name))
+    elif r_long_name:            
+        match_exps.append("%s%s%s-hways-*-all.csv" \
+            % (hways_dir, os.sep, route_print_name))
+        match_exps.append("%s%s*-%s-hways-*-all.csv" \
+            % (hways_dir, os.sep, route_print_name))
+    route_hways_fnames = []
+    for match_exp in match_exps:    
+        route_hways_fnames += glob.glob(match_exp)
+    return route_hways_fnames
+
+def copy_route_hways(r_short_name, r_long_name, hways_dir_in,
+        hways_dir_out):
+    route_print_name = misc_utils.routeNameFileReady(
+        r_short_name, r_long_name)
+    route_hways_fnames = glob.glob(
+        "%s%s%s-hways-*-all.csv" % (hways_dir_in, os.sep, \
+            route_print_name))
+    copy_path_out = misc_utils.get_win_safe_path(hways_dir_out)
+    for hways_fname in route_hways_fnames:
+        copy_path_in = misc_utils.get_win_safe_path(hways_fname)
+        shutil.copy(copy_path_in, copy_path_out)
+    return
+
 def write_headways_minutes(stop_gtfs_ids_to_names_map, period_headways,
         periods, csv_fname, stop_id_order=None):
 
@@ -36,7 +96,7 @@ def write_headways_minutes(stop_gtfs_ids_to_names_map, period_headways,
     writer = csv.writer(csv_file, delimiter=';')
 
     period_names = misc_utils.get_time_period_name_strings(periods)
-    writer.writerow(['Stop_id','Stop_name',] + period_names)
+    writer.writerow(HWAYS_PER_STOP_HDRS + period_names)
 
     if stop_id_order is None:
         s_ids = period_headways.keys()
@@ -49,8 +109,30 @@ def write_headways_minutes(stop_gtfs_ids_to_names_map, period_headways,
     csv_file.close()
     return
 
-AVG_HWAYS_ALL_STOPS_HDRS = ['route_id','route_short_name','route_long_name',\
-    'serv_period','trips_dir']
+def read_headways_minutes(csv_fname):
+    safe_fpath = misc_utils.get_win_safe_path(csv_fname)
+    csv_file = open(safe_fpath, 'r')
+    reader = csv.reader(csv_file, delimiter=';')
+
+    headers = reader.next()
+    tperiod_strings = headers[len(HWAYS_PER_STOP_HDRS):]
+    time_periods = misc_utils.get_time_periods_from_strings(tperiod_strings)
+    stop_id_i = HWAYS_PER_STOP_HDRS.index('Stop_id')
+    stop_name_i = HWAYS_PER_STOP_HDRS.index('Stop_name')
+
+    seg_distances = {}
+    headways_at_stops_in_tps = {}
+    stop_gtfs_ids_to_names_map = {}
+    for row in reader:
+        stop_id = row[stop_id_i]
+        stop_name = row[stop_name_i]
+        if not stop_name: stop_name = None
+        stop_gtfs_ids_to_names_map[int(stop_id)] = stop_name
+        hways_in_tps = map(float, row[len(HWAYS_PER_STOP_HDRS):])
+        headways_at_stops_in_tps[stop_id] = hways_in_tps
+    csv_file.close()
+    return time_periods, headways_at_stops_in_tps, \
+        stop_gtfs_ids_to_names_map 
 
 def write_route_hways_all_routes_all_stops(r_ids_to_names_map,
         time_periods, avg_hways_all_stops, output_fname, round_places=2):

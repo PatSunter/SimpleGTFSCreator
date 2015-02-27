@@ -3,8 +3,13 @@ import os, sys
 import os.path
 from datetime import time, datetime, date, timedelta
 import csv
+import glob
+import shutil
 
 import misc_utils
+
+AVG_SPEED_HEADERS = ['Stop_a_id','Stop_a_name','Stop_b_id','Stop_b_name',\
+        'seg_dist_m'] # then time periods follow.
 
 def get_route_avg_speeds_for_dir_period_fname(r_short_name, r_long_name,
         serv_period, route_dir):
@@ -14,8 +19,61 @@ def get_route_avg_speeds_for_dir_period_fname(r_short_name, r_long_name,
         (rname_file_ready, serv_period, rdir_str)
     return fname
 
-AVG_SPEED_HEADERS = ['Stop_a_id','Stop_a_name','Stop_b_id','Stop_b_name',\
-        'seg_dist_m'] # then time periods follow.
+def get_info_from_fname(route_speeds_fname, r_s_name=None, r_l_name=None):
+    fname_sections = os.path.basename(route_speeds_fname).split('-')
+    # Index from the back, as name used depends on if 
+    # both short and long name specified.
+    serv_period = fname_sections[-3]
+    trips_dir_file_ready = fname_sections[-2]
+    if r_s_name and r_l_name:
+        name_a = r_s_name
+        name_b = r_l_name
+    else:
+        # We need to get these from the file.
+        name_b = fname_sections[-5]
+        try:
+            name_a = fname_sections[-6]
+        except IndexError:
+            name_a = None
+    return name_a, name_b, trips_dir_file_ready, serv_period 
+
+def get_avg_speeds_fnames(speeds_dir, r_short_name, r_long_name):
+    # The match depends on if we've specified both old route short
+    # and long names. If only one specified, need looser search.
+    route_print_name = misc_utils.routeNameFileReady(
+        r_short_name, r_long_name)
+    match_exps = []
+    if r_short_name and r_long_name:
+        match_exps.append("%s%s%s-speeds-*-all.csv" \
+            % (speeds_dir, os.sep, route_print_name))
+    elif r_short_name:
+        match_exps.append("%s%s%s-speeds-*-all.csv" \
+            % (speeds_dir, os.sep, route_print_name))
+        match_exps.append("%s%s%s-*-speeds-*-all.csv" \
+            % (speeds_dir, os.sep, route_print_name))
+    elif r_long_name:            
+        match_exps.append("%s%s%s-speeds-*-all.csv" \
+            % (speeds_dir, os.sep, route_print_name))
+        match_exps.append("%s%s*-%s-speeds-*-all.csv" \
+            % (speeds_dir, os.sep, route_print_name))
+    route_speeds_fnames = []
+    for match_exp in match_exps:    
+        route_speeds_fnames += glob.glob(match_exp)
+    return route_speeds_fnames
+
+def copy_route_speeds(r_short_name, r_long_name, speeds_dir_in,
+        speeds_dir_out):
+    route_print_name = misc_utils.routeNameFileReady(
+        r_short_name, r_long_name)
+    route_speeds_fnames = glob.glob(
+        "%s%s%s-speeds-*-all.csv" % (speeds_dir_in, os.sep, \
+            route_print_name))
+    copy_path_out = misc_utils.get_win_safe_path(speeds_dir_out)
+    for speeds_fname in route_speeds_fnames:
+        copy_path_in = misc_utils.get_win_safe_path(speeds_fname)
+        shutil.copy(copy_path_in, copy_path_out)
+    return
+
 
 def write_avg_speeds_on_segments(stop_gtfs_ids_to_names_map, period_avg_speeds,
         seg_distances, periods, csv_fname, round_places):
